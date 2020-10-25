@@ -180,6 +180,8 @@ std::shared_ptr<SparseMatrix> A;
 std::shared_ptr<SparseMatrix> AHi;
 Eigen::SparseLU<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> solverLow, solverHi;
 Eigen::SparseLU<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> solverRotations;
+Eigen::SparseMatrix<double> RotationMatrix;
+vector<Eigen::Triplet<double>> triplets;
 int systemType = LaplaceBeltrami; //MeanValue; //LaplaceBeltrami
 bool g_showSpheres = true;
 bool g_showWires = false;
@@ -453,6 +455,8 @@ int main(int argc, char* argv[])
 	b3Hi = Eigen::MatrixXd(AHi->numRows(), 3);
 	PreFactor(AHi, constraintsHi, solverHi);
 
+  RotationMatrix = Eigen::SparseMatrix<double>(A->numRows()*4, A->numColumns()*4);
+  triplets.resize(A->NonZeros()*16);
   Rknown = Eigen::VectorXd(A->numRows()*4);
   Rknown.setZero();
 
@@ -610,7 +614,7 @@ pij = d e1 + e e2 + f e3
 (b f - c e) e2e3 + (c d - a f) e3e1 + (a e - b d) e1e2
 (qy pz - qz py) e2e3 + (qz px - qx pz) e3e1 + (qx py - qy px) e1e2
 */
-void E3GA_Prep(const vector<Eigen::Vector3d>& P, const vector<Eigen::Vector3d>& Q, const vector<double>& w, double wij2, const int N, Eigen::Matrix4d &JtJ)
+void E3GA_Prep(const vector<Eigen::Vector3d>& P, const vector<Eigen::Vector3d>& Q, const vector<double>& w, const int N, Eigen::Matrix4d &JtJ)
 {
 	Eigen::Matrix3d Sx;
 	double wj;
@@ -636,15 +640,8 @@ void E3GA_Prep(const vector<Eigen::Vector3d>& P, const vector<Eigen::Vector3d>& 
 	JtJ(1,3) = -(Sx(2, 0) + Sx(0, 2));
 	JtJ(2,2) = -2.0 * Sx(1, 1) + wj;  
 	JtJ(2,3) = -(Sx(1, 2) + Sx(2, 1));
-	JtJ(3,3) = -2.0 * Sx(2, 2) + wj;  
-
-	const double nwij2 = N * wij2;
-
-	JtJ(0, 0) += nwij2;
-	JtJ(1, 1) += nwij2;
-	JtJ(2, 2) += nwij2;
-	JtJ(3, 3) += nwij2;
-
+	JtJ(3,3) = -2.0 * Sx(2, 2) + wj;
+  //JtJ.selfadjointView<Eigen::Upper>().evalTo(JtJ);
 	JtJ(1, 0) = JtJ(0, 1);
 	JtJ(2, 0) = JtJ(0, 2);
 	JtJ(2, 1) = JtJ(1, 2);
@@ -659,9 +656,7 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
 	vector<Eigen::Vector3d> Q;
   vector<double> w;
   vector<int> neighbors;
-  Eigen::SparseMatrix<double> RotationMatrix(A->numRows()*4, A->numColumns()*4);
   Eigen::VectorXd Rbest;
-  vector<Eigen::Triplet<double>> triplets;
   Eigen::Matrix4d JtJ;
 
 	P.resize(32);
@@ -669,8 +664,10 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
   neighbors.resize(32);
   triplets.reserve(A->NonZeros()*16);
   w.resize(32);
-	const double alpha = 0.28;
-
+	const double alpha = 0.14;
+  const double alphaA = alpha * g_meshArea;
+  int nnz = 0;
+  
 	for (Vertex& vertex : mesh->getVertices())
 	{
 		int i = vertex.ID;
@@ -691,32 +688,41 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
       neighbors[vertexDegree] = j;
       w[vertexDegree] = (*A)(i, j);
 		}
-		double invVertexDegree = alpha * g_meshArea / (double)vertexDegree;
     if (!is_constrained(constraints, i)) {
-      E3GA_Prep(P, Q, w, invVertexDegree, vertexDegree, JtJ);
+  		double invVertexDegree = alphaA / (double)(vertexDegree + 1); // Plus 1 since we consider the feedback.
       for(int v = 0; v < vertexDegree; ++v) {
         int jj = neighbors[v]*4;
-        triplets.push_back(Eigen::Triplet<double>(ii+0, jj+0, -invVertexDegree));
-        triplets.push_back(Eigen::Triplet<double>(ii+1, jj+1, -invVertexDegree));
-        triplets.push_back(Eigen::Triplet<double>(ii+2, jj+2, -invVertexDegree));
-        triplets.push_back(Eigen::Triplet<double>(ii+3, jj+3, -invVertexDegree));
+        triplets[nnz++] = Eigen::Triplet<double>(ii+0, jj+0, -invVertexDegree);
+        triplets[nnz++] = Eigen::Triplet<double>(ii+1, jj+1, -invVertexDegree);
+        triplets[nnz++] = Eigen::Triplet<double>(ii+2, jj+2, -invVertexDegree);
+        triplets[nnz++] = Eigen::Triplet<double>(ii+3, jj+3, -invVertexDegree);
       }
-      triplets.push_back(Eigen::Triplet<double>(ii+0, ii+0, JtJ(0, 0)));
-      triplets.push_back(Eigen::Triplet<double>(ii+0, ii+1, JtJ(0, 1)));
-      triplets.push_back(Eigen::Triplet<double>(ii+0, ii+2, JtJ(0, 2)));
-      triplets.push_back(Eigen::Triplet<double>(ii+0, ii+3, JtJ(0, 3)));
-      triplets.push_back(Eigen::Triplet<double>(ii+1, ii+0, JtJ(1, 0)));
-      triplets.push_back(Eigen::Triplet<double>(ii+1, ii+1, JtJ(1, 1)));
-      triplets.push_back(Eigen::Triplet<double>(ii+1, ii+2, JtJ(1, 2)));
-      triplets.push_back(Eigen::Triplet<double>(ii+1, ii+3, JtJ(1, 3)));
-      triplets.push_back(Eigen::Triplet<double>(ii+2, ii+0, JtJ(2, 0)));
-      triplets.push_back(Eigen::Triplet<double>(ii+2, ii+1, JtJ(2, 1)));
-      triplets.push_back(Eigen::Triplet<double>(ii+2, ii+2, JtJ(2, 2)));
-      triplets.push_back(Eigen::Triplet<double>(ii+2, ii+3, JtJ(2, 3)));
-      triplets.push_back(Eigen::Triplet<double>(ii+3, ii+0, JtJ(3, 0)));
-      triplets.push_back(Eigen::Triplet<double>(ii+3, ii+1, JtJ(3, 1)));
-      triplets.push_back(Eigen::Triplet<double>(ii+3, ii+2, JtJ(3, 2)));
-      triplets.push_back(Eigen::Triplet<double>(ii+3, ii+3, JtJ(3, 3)));
+      E3GA_Prep(P, Q, w, vertexDegree, JtJ);
+      JtJ(0, 0) += alphaA + 1e-6;
+      JtJ(1, 1) += alphaA + 1e-6;
+      JtJ(2, 2) += alphaA + 1e-6;
+      JtJ(3, 3) += alphaA + 1e-6;
+      triplets[nnz++] = Eigen::Triplet<double>(ii+0, ii+0, JtJ(0, 0));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+0, ii+1, JtJ(0, 1));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+0, ii+2, JtJ(0, 2));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+0, ii+3, JtJ(0, 3));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+1, ii+0, JtJ(1, 0));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+1, ii+1, JtJ(1, 1));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+1, ii+2, JtJ(1, 2));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+1, ii+3, JtJ(1, 3));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+2, ii+0, JtJ(2, 0));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+2, ii+1, JtJ(2, 1));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+2, ii+2, JtJ(2, 2));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+2, ii+3, JtJ(2, 3));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+3, ii+0, JtJ(3, 0));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+3, ii+1, JtJ(3, 1));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+3, ii+2, JtJ(3, 2));
+      triplets[nnz++] = Eigen::Triplet<double>(ii+3, ii+3, JtJ(3, 3));
+      // Feedback added on the RHS.
+      Rknown[ii+0] = invVertexDegree * vertexDescriptors.rotors[i].w();
+      Rknown[ii+1] = invVertexDegree * vertexDescriptors.rotors[i].x();
+      Rknown[ii+2] = invVertexDegree * vertexDescriptors.rotors[i].y();
+      Rknown[ii+3] = invVertexDegree * vertexDescriptors.rotors[i].z();
     }
     else
     {
@@ -725,13 +731,13 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
       Rknown[ii+1] = M.x();
       Rknown[ii+2] = M.y();
       Rknown[ii+3] = M.z();
-      triplets.push_back(Eigen::Triplet<double>(ii+0, ii+0, 1.0));
-      triplets.push_back(Eigen::Triplet<double>(ii+1, ii+1, 1.0));
-      triplets.push_back(Eigen::Triplet<double>(ii+2, ii+2, 1.0));
-      triplets.push_back(Eigen::Triplet<double>(ii+3, ii+3, 1.0));      
+      triplets[nnz++] = Eigen::Triplet<double>(ii+0, ii+0, 1.0);
+      triplets[nnz++] = Eigen::Triplet<double>(ii+1, ii+1, 1.0);
+      triplets[nnz++] = Eigen::Triplet<double>(ii+2, ii+2, 1.0);
+      triplets[nnz++] = Eigen::Triplet<double>(ii+3, ii+3, 1.0);     
     }
 	}
-  RotationMatrix.setFromTriplets(triplets.begin(), triplets.end());
+  RotationMatrix.setFromTriplets(triplets.begin(), triplets.begin() + nnz);
   if(analyzeSystem) {
     solverRotations.analyzePattern(RotationMatrix);
   }
