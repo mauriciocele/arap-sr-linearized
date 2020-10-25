@@ -679,13 +679,72 @@ void E3GA_Prep(const vector<Eigen::Vector3d>& P, const vector<Eigen::Vector3d>& 
 	JtJ(2,2) = -2.0 * Sx(1, 1) + wj;  
 	JtJ(2,3) = -(Sx(1, 2) + Sx(2, 1));
 	JtJ(3,3) = -2.0 * Sx(2, 2) + wj;
-  //JtJ.selfadjointView<Eigen::Upper>().evalTo(JtJ);
-	JtJ(1, 0) = JtJ(0, 1);
-	JtJ(2, 0) = JtJ(0, 2);
-	JtJ(2, 1) = JtJ(1, 2);
-	JtJ(3, 0) = JtJ(0, 3);
-	JtJ(3, 1) = JtJ(1, 3);
-	JtJ(3, 2) = JtJ(2, 3);
+  JtJ.selfadjointView<Eigen::Upper>().evalTo(JtJ);
+}
+
+Eigen::Quaterniond E3GA_Fast4(const vector<Eigen::Vector3d>& P, const vector<Eigen::Vector3d>& Q, const vector<double>& w, double alphaA, const vector<Eigen::Quaterniond>& Rq, const Eigen::Quaterniond& Rx, const int N)
+{
+	Eigen::Matrix4d JtJ;
+	Eigen::Matrix3d Sx;
+  Eigen::Vector4d b, x;
+
+  b.setZero();
+  for (int i = 0; i < N; ++i)
+	{
+		const Eigen::Quaterniond& Qi = Rq[i];
+		b(0) += (Qi.w() - 1.0); // 1.0
+		b(1) += Qi.x(); // e1 ^ e2
+		b(2) += Qi.y(); // e1 ^ e3
+		b(3) += Qi.z(); // e2 ^ e3
+	}
+  
+  b *= alphaA / (double) N;
+
+  b(0) += 1e-6 * (Rx.w() - 1.0); // 1.0
+	b(1) += 1e-6 * Rx.x(); // e1 ^ e2
+	b(2) += 1e-6 * Rx.y(); // e1 ^ e3
+	b(3) += 1e-6 * Rx.z(); // e2 ^ e3
+
+	double wj;
+	Sx.setZero();
+	double S = 0;
+	for (size_t j = 0; j < N; ++j) {
+		wj = w[j];
+		const Eigen::Vector3d& Qj = Q[j];
+		const Eigen::Vector3d& Pj = P[j];
+		S += wj * Pj.dot(Pj);
+		S += wj * Qj.dot(Qj);
+		Sx.noalias() += (wj * Pj) * Qj.transpose();
+	}
+
+	wj = 0.5 * S;
+ 	JtJ(0,0) = wj - Sx.trace();
+	wj = wj + Sx.trace();
+	JtJ(0,1) = -(Sx(1, 2) - Sx(2, 1));
+	JtJ(0,2) = -(Sx(2, 0) - Sx(0, 2));
+	JtJ(0,3) = -(Sx(0, 1) - Sx(1, 0));
+	JtJ(1,1) = -2.0 * Sx(0, 0) + wj;  
+	JtJ(1,2) = -(Sx(0, 1) + Sx(1, 0)); 
+	JtJ(1,3) = -(Sx(2, 0) + Sx(0, 2));
+	JtJ(2,2) = -2.0 * Sx(1, 1) + wj;  
+	JtJ(2,3) = -(Sx(1, 2) + Sx(2, 1));
+	JtJ(3,3) = -2.0 * Sx(2, 2) + wj;
+  JtJ.selfadjointView<Eigen::Upper>().evalTo(JtJ);
+
+  b(0) += -JtJ(0, 0);
+	b(1) += -JtJ(0, 1);
+	b(2) += -JtJ(0, 2);
+	b(3) += -JtJ(0, 3);
+
+  const double nwij2 = alphaA + 1e-6;
+
+	JtJ(0, 0) += nwij2;
+	JtJ(1, 1) += nwij2;
+	JtJ(2, 2) += nwij2;
+	JtJ(3, 3) += nwij2;
+
+  x.noalias() = JtJ.inverse().eval() * b;
+  return Eigen::Quaterniond(1.0 + x(0), x(1), x(2), x(3)).normalized();
 }
 
 void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, std::set<int>& constraints, bool analyzeSystem)
@@ -696,13 +755,17 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
   vector<int> neighbors;
   Eigen::VectorXd Rbest;
   Eigen::Matrix4d JtJ;
+  vector<Eigen::Quaterniond> Rq;
 
 	P.resize(32);
 	Q.resize(32);
   neighbors.resize(32);
   triplets.reserve(A->NonZeros()*16);
   w.resize(32);
+  Rq.resize(32);
 	const double alpha = 0.14;
+	const double ei = 0.2;
+  const double cij = 1.0;
   const double alphaA = alpha * g_meshArea;
   int nnz = 0;
   
@@ -727,7 +790,7 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
       w[vertexDegree] = (*A)(i, j);
 		}
     if (!is_constrained(constraints, i)) {
-  		double invVertexDegree = alphaA / (double)(vertexDegree + 1); // Plus 1 since we consider the feedback.
+  		double invVertexDegree = (alphaA * cij) / ((double)vertexDegree + ei); // Plus ei since we consider the feedback.
       for(int v = 0; v < vertexDegree; ++v) {
         int jj = neighbors[v]*4;
         triplets[nnz++] = Eigen::Triplet<double>(ii+0, jj+0, -invVertexDegree);
@@ -757,6 +820,7 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
       triplets[nnz++] = Eigen::Triplet<double>(ii+3, ii+2, JtJ(3, 2));
       triplets[nnz++] = Eigen::Triplet<double>(ii+3, ii+3, JtJ(3, 3));
       // Feedback added on the RHS.
+      invVertexDegree *= ei;
       Rknown[ii+0] = invVertexDegree * vertexDescriptors.rotors[i].w();
       Rknown[ii+1] = invVertexDegree * vertexDescriptors.rotors[i].x();
       Rknown[ii+2] = invVertexDegree * vertexDescriptors.rotors[i].y();
@@ -764,7 +828,11 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
     }
     else
     {
-      Eigen::Quaterniond M = GARotorEstimator(P, Q, vertexDegree, w);
+      for(int v = 0; v < vertexDegree; ++v) {
+        Rq[v] = vertexDescriptors.rotors[neighbors[v]];
+      }
+
+      Eigen::Quaterniond M = E3GA_Fast4(P, Q, w, alphaA, Rq, vertexDescriptors.rotors[i], vertexDegree);
       Rknown[ii+0] = M.w();
       Rknown[ii+1] = M.x();
       Rknown[ii+2] = M.y();
