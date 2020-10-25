@@ -1,6 +1,44 @@
-// Flatten.cpp : Defines the entry point for the console application.
-//
+/*
+arg min Sum_i Ei(Ri)
+  s.t. ~Ri Ri = 1
 
+Ei = Sum_j wij |Ri qji ~Ri - pji|^2 + A Sum_j cij |Ri - Rj|^2 + ei |Ri - R_{i-1}|^2
+
+where:  Sum_j wij = 1    and     ei + Sum_j cij = 1
+
+Ei = Sum_j wij |Ri qji - pji Ri|^2 + A Sum_j cij |Ri - Rj|^2 + ei |Ri - R_{i-1}|^2
+
+Since: Sum_j wij |Ri qji - pji Ri|^2 = Ri^T Hi Ri
+
+Ei = Ri^T Hi Ri + A Sum_j cij |Ri - Rj|^2 + ei |Ri - R_{i-1}|^2
+
+dEi/Ri = 2 Hi Ri + 2 A sum_j(cij Ri - Rj) + 2 ei (Ri - R_{i-1})
+dEi/Ri = Hi Ri + A sum_j(cij Ri) - A sum_j(cij Rj) + ei Ri - ei R_{i-1}
+dEi/Ri = Hi Ri + A Ri sum_j(cij) - A sum_j(cij Rj) + ei Ri - ei R_{i-1}
+dEi/Ri = (Hi + A sum_j(cij) I + ei I) Ri - sum_j(A cij Rj) - ei R_{i-1}
+
+Setting dEi/Ri = 0
+
+(Hi + A sum_j(cij) I + ei I) Ri - sum_j(A cij Rj) - ei R_{i-1} = 0
+
+Setting Mi = Hi + (A sum_j(cij) + ei) I
+
+And imposing: sum_j(cij) + ei = 1
+
+Mi = Hi + A I
+
+Mi Ri = sum_j(A cij Rj) + ei R_{i-1}
+
+M R = L R + ei R_prev
+
+Where 
+   M is stacking Mi at the diagonal
+   L is laplacian matrix from sum_j(A cij Rj)
+   R_prev is stacking feedback R_{i-1}
+
+Solve (M - L) R = ei R_prev
+s.t R = R_const,  at the constrained points.
+*/
 #ifdef WIN32
 #define NOMINMAX
 #include <windows.h>
