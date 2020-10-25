@@ -1,0 +1,225 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Archivos de origen">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Archivos de encabezado">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Archivos de recursos">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="HalfEdge">
+      <UniqueIdentifier>{e4a86871-ee7a-466a-96d9-250bb2936f76}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="GA">
+      <UniqueIdentifier>{c1c280c7-5b2a-43b2-8196-68df0240ad15}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Benchs.h">
+      <Filter>Archivos de encabezado</Filter>
+    </ClInclude>
+    <ClInclude Include="gahelper.h">
+      <Filter>Archivos de encabezado</Filter>
+    </ClInclude>
+    <ClInclude Include="Laplacian.h">
+      <Filter>Archivos de encabezado</Filter>
+    </ClInclude>
+    <ClInclude Include="primitivedraw.h">
+      <Filter>Archivos de encabezado</Filter>
+    </ClInclude>
+    <ClInclude Include="HalfEdge\Edge.h">
+      <Filter>HalfEdge</Filter>
+    </ClInclude>
+    <ClInclude Include="HalfEdge\Face.h">
+      <Filter>HalfEdge</Filter>
+    </ClInclude>
+    <ClInclude Include="HalfEdge\Mesh.h">
+      <Filter>HalfEdge</Filter>
+    </ClInclude>
+    <ClInclude Include="HalfEdge\util.h">
+      <Filter>HalfEdge</Filter>
+    </ClInclude>
+    <ClInclude Include="HalfEdge\Vertex.h">
+      <Filter>HalfEdge</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c2ga.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c2ga_draw.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c2ga_parse.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c2ga_util.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c2gatoc3ga.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c3ga.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c3ga_draw.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\c3ga_util.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\common.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\draw.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\e2ga.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\e2ga_draw.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\e2ga_util.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\e3ga.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\e3ga_draw.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\e3ga_util.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\gabits.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\geosphere.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\gl_util.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\glut_util.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\h3ga.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\h3ga_draw.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\h3ga_util.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\mv_analyze.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\mvtypebase.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+    <ClInclude Include="GA\timing.h">
+      <Filter>GA</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Flatten.cpp">
+      <Filter>Archivos de origen</Filter>
+    </ClCompile>
+    <ClCompile Include="Laplacian.cpp">
+      <Filter>Archivos de origen</Filter>
+    </ClCompile>
+    <ClCompile Include="primitivedraw.cpp">
+      <Filter>Archivos de origen</Filter>
+    </ClCompile>
+    <ClCompile Include="HalfEdge\Mesh.cpp">
+      <Filter>HalfEdge</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\c2ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\c2ga_draw.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\c2ga_util.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\c2gatoc3ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\c3ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\c3ga_draw.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\c3ga_util.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\draw.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\e2ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\e2ga_draw.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\e3ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\e3ga_draw.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\e3ga_util.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\geosphere.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\gl_util.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\glut_util.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\h3ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\h3ga_draw.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\h3ga_util.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\mv_analyze.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\mv_analyze_c2ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\mv_analyze_c3ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\mv_analyze_e2ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\mv_analyze_e3ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\mv_analyze_h3ga.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+    <ClCompile Include="GA\timing.cpp">
+      <Filter>GA</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="ReadMe.txt" />
+  </ItemGroup>
+</Project>

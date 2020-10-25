@@ -1,0 +1,1 @@
+FAST Smooth Rotation Enhanced ARAP Mesh Deformation with Linearized Rotations
