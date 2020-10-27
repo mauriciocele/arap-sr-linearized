@@ -77,6 +77,21 @@
       "cinttypes": "cpp",
       "hashtable": "cpp",
       "stack": "cpp",
-      "matrixfunctions": "cpp"
+      "matrixfunctions": "cpp",
+      "superlusupport": "cpp",
+      "*.evaluator": "cpp",
+      "*.traits": "cpp",
+      "adolcforward": "cpp",
+      "alignedvector3": "cpp",
+      "autodiff": "cpp",
+      "bvh": "cpp",
+      "eulerangles": "cpp",
+      "fft": "cpp",
+      "kroneckerproduct": "cpp",
+      "mprealsupport": "cpp",
+      "numericaldiff": "cpp",
+      "openglsupport": "cpp",
+      "specialfunctions": "cpp",
+      "splines": "cpp"
     }
 }
