@@ -204,7 +204,7 @@ public:
 
 Camera g_camera;
 Mesh mesh, meshLow;
-map<int, int> mapping, rotorClusters;
+map<int, int> mapping;
 vectorE3GA g_prevMousePos;
 bool g_rotateModel = false;
 bool g_rotateModelOutOfPlane = false;
@@ -229,6 +229,8 @@ Eigen::MatrixXd xyzLow;
 Eigen::MatrixXd b3Hi;
 Eigen::MatrixXd xyzHi;
 Eigen::VectorXd Rknown;
+Eigen::MatrixXd RknownHi;
+Eigen::MatrixXd RbestHi;
 
 double g_meshArea = 0.0;
 
@@ -355,32 +357,6 @@ void meshMapping(Mesh *meshLow, Mesh *mesh, map<int, int>& mapping)
 		}
 		mapping[vertexLow.ID] = mappedPoint;
 	}
-
-	vector<bool> visited = vector<bool>(mesh->numVertices(), false);
-	queue<int> assigned;
-
-	for (auto&& pair : mapping){
-		visited[pair.second] = true;
-		rotorClusters[pair.second] = pair.first;
-		assigned.push(pair.second);
-	}
-
-	while (!assigned.empty())
-	{
-		int i = assigned.front();
-		assigned.pop();
-		visited[i] = true;
-
-		for (Vertex::EdgeAroundIterator edgeAroundIter = mesh->vertexAt(i).iterator(); !edgeAroundIter.end(); edgeAroundIter++)
-		{
-			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
-			if (visited[j] == false)
-			{
-				rotorClusters[j] = rotorClusters[i];
-				assigned.push(j);
-			}
-		}
-	}
 }
 
 int main(int argc, char* argv[])
@@ -497,38 +473,15 @@ int main(int argc, char* argv[])
   triplets.resize(A->NonZeros()*16);
   Rknown = Eigen::VectorXd(A->numRows()*4);
   Rknown.setZero();
+  RknownHi = Eigen::MatrixXd(AHi->numRows(), 4);
+  RknownHi.setZero();
 
 	glutMainLoop();
 
 	return 0;
 }
 
-void transferRotations(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
-{
-	for (auto&& pair : rotorClusters) {
-		vertexDescriptors.rotors[pair.first] = vertexDescriptorsLow.rotors[pair.second];
-	}
-
-	std::fill(vertexDescriptors.laplacianCoordinates.begin(), vertexDescriptors.laplacianCoordinates.end(), Eigen::Vector3d(0, 0, 0));
-
-	//concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
-	for (Vertex& vertex : mesh->getVertices())
-	{
-		int i = vertex.ID;
-		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); !edgeAroundIter.end(); edgeAroundIter++)
-		{
-			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
-			double wij = (*A)(i, j);
-			Eigen::Quaterniond &Ri = vertexDescriptors.rotors[i];
-			Eigen::Quaterniond &Rj = vertexDescriptors.rotors[j];
-			Eigen::Vector3d V = mesh->vertexAt(j).p - mesh->vertexAt(i).p;
-			vertexDescriptors.laplacianCoordinates[i] += 0.5 * wij * (Ri._transformVector(V) + Rj._transformVector(V));;
-		}
-	}
-	//});
-}
-
-void SolveLinearSystemTaucs(VertexBuffer& vertexDescriptors)
+void SolvePoissonEquation(VertexBuffer& vertexDescriptors)
 {
 	int n = vertexDescriptors.get_size();
 
@@ -550,7 +503,7 @@ void SolveLinearSystemTaucs(VertexBuffer& vertexDescriptors)
 	}
 }
 
-void SolveLinearSystemTaucsHi(VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
+void SolvePoissonEquationHi(VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
 {
 	int n = vertexDescriptors.get_size();
 
@@ -567,6 +520,32 @@ void SolveLinearSystemTaucsHi(VertexBuffer& vertexDescriptors, VertexBuffer& ver
 	for (int i = 0; i < n; ++i) {
 		vertexDescriptors.deformedPositions[i] = xyzHi.row(i);
 		vertexDescriptors.normals[i] = vertexDescriptors.rotors[i]._transformVector(vertexDescriptors.normalsOrig[i]);
+	}
+}
+
+/*
+Laplacian: L(Ri) => Ri = Sum_j wij Rj
+
+Solve Sum_i wij (Ri - Rj) = 0
+s.t Ri = R_const,  at the constrained points.
+
+L Ri = 0
+s.t Ri = R_const
+
+Where L is discrete laplacian operator
+*/
+void LaplacianRotationsInterpolation(VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
+{
+	int n = vertexDescriptors.get_size();
+
+	for (auto&& pair : mapping){
+		RknownHi.row(pair.second) = vertexDescriptorsLow.rotors[pair.first].coeffs();
+	}
+
+	RbestHi = solverHi.solve(RknownHi);
+
+	for (int i = 0; i < n; ++i) {
+		vertexDescriptors.rotors[i] = Eigen::Quaterniond((Eigen::Vector4d)RbestHi.row(i)).normalized();
 	}
 }
 
@@ -875,6 +854,29 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
 	}
 }
 
+void transferRotations(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
+{
+  LaplacianRotationsInterpolation(vertexDescriptors, vertexDescriptorsLow);
+
+	std::fill(vertexDescriptors.laplacianCoordinates.begin(), vertexDescriptors.laplacianCoordinates.end(), Eigen::Vector3d(0, 0, 0));
+
+	//concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
+	for (Vertex& vertex : mesh->getVertices())
+	{
+		int i = vertex.ID;
+		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); !edgeAroundIter.end(); edgeAroundIter++)
+		{
+			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
+			double wij = (*A)(i, j);
+			Eigen::Quaterniond &Ri = vertexDescriptors.rotors[i];
+			Eigen::Quaterniond &Rj = vertexDescriptors.rotors[j];
+			Eigen::Vector3d V = mesh->vertexAt(j).p - mesh->vertexAt(i).p;
+			vertexDescriptors.laplacianCoordinates[i] += 0.5 * wij * (Ri._transformVector(V) + Rj._transformVector(V));;
+		}
+	}
+	//});
+}
+
 double ComputeEnergy(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors)
 {
 	double arapEnergy = 0.0;
@@ -983,16 +985,16 @@ void display()
 		{
 			if(oneTime == true)
 			{
-				SolveLinearSystemTaucs(vertexDescriptorsLow);
+				SolvePoissonEquation(vertexDescriptorsLow);
 			}
 
 			for(int i = 0 ; i < 3 ; ++i)
 			{
         SolveRotationsSystem(&meshLow, A, vertexDescriptorsLow, allconstraints, oneTime == true);
-				SolveLinearSystemTaucs(vertexDescriptorsLow);
+				SolvePoissonEquation(vertexDescriptorsLow);
 			}
 			transferRotations(&mesh, AHi, vertexDescriptors, vertexDescriptorsLow);
-			SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
+			SolvePoissonEquationHi(vertexDescriptors, vertexDescriptorsLow);
 
       oneTime = false;
 		}
@@ -1012,7 +1014,7 @@ void display()
 				begin = clock();
 
         SolveRotationsSystem(&meshLow, A, vertexDescriptorsLow, allconstraints, false);
-				SolveLinearSystemTaucs(vertexDescriptorsLow);
+				SolvePoissonEquation(vertexDescriptorsLow);
 
 				end = clock();
 
@@ -1034,17 +1036,17 @@ void display()
 			std::cout << "Total accum time (sec): " << avgTime << endl;
 
 			transferRotations(&mesh, AHi, vertexDescriptors, vertexDescriptorsLow);
-			SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
+			SolvePoissonEquationHi(vertexDescriptors, vertexDescriptorsLow);
 		}
 		else
 		{
 			for (int i = 0; i < 100; ++i)
 			{
         SolveRotationsSystem(&meshLow, A, vertexDescriptorsLow, allconstraints, false);
-				SolveLinearSystemTaucs(vertexDescriptorsLow);
+				SolvePoissonEquation(vertexDescriptorsLow);
 			}
 			transferRotations(&mesh, AHi, vertexDescriptors, vertexDescriptorsLow);
-			SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
+			SolvePoissonEquationHi(vertexDescriptors, vertexDescriptorsLow);
 		}
 		g_iterateManyTimes = false;
 	}
