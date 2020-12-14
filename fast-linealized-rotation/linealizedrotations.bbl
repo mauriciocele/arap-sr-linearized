@@ -1,0 +1,42 @@
+\begin{thebibliography}{1}
+
+\bibitem{Dorst2007}
+L.~Dorst, D.~Fontijne, and S.~Mann.
+\newblock {\em Geometric Algebra for Computer Science}.
+\newblock Morgan Kaufmann Publishers Inc., San Francisco, CA, USA, 2007.
+
+\bibitem{Levi2015}
+Z.~Levi and C.~Gotsman.
+\newblock Smooth rotation enhanced as-rigid-as-possible mesh animation.
+\newblock {\em IEEE transactions on visualization and computer graphics},
+  21(2):264—277, February 2015.
+
+\bibitem{Lopez2013}
+M.~C. Lopez~Belon.
+\newblock Applications of conformal geometric algebra in mesh deformation.
+\newblock In {\em Graphics, Patterns and Images (SIBGRAPI), 2013 26th SIBGRAPI
+  - Conference on}, pages 39--46, Aug 2013.
+
+\bibitem{GALinearizedArap}
+M.~C. Lopez~Belon.
+\newblock Project on github.
+\newblock Available at {https://github.com/mauriciocele/arap-sr-linearized},
+  2020.
+
+\bibitem{Pinkall1993}
+U.~Pinkall, S.~D. Juni, and K.~Polthier.
+\newblock Computing discrete minimal surfaces and their conjugates.
+\newblock {\em Experimental Mathematics}, 2:15--36, 1993.
+
+\bibitem{Ligare2020}
+J.~{Wu}, M.~{Lopez}, M.~{Liu}, and Y.~{Zhu}.
+\newblock Linear geometric algebra rotor estimator for efficient mesh
+  deformation.
+\newblock {\em IET Cyber-systems and Robotics}, 2(2):88--95, 2020.
+
+\bibitem{Zayer2005}
+R.~Zayer, C.~Rössl, Z.~Karni, and H.~peter Seidel.
+\newblock Harmonic guidance for surface deformation.
+\newblock In {\em In Proc. of Eurographics 05}, pages 601--609, 2005.
+
+\end{thebibliography}

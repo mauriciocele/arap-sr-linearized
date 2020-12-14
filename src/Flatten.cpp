@@ -361,11 +361,11 @@ void meshMapping(Mesh *meshLow, Mesh *mesh, map<int, int>& mapping)
 
 int main(int argc, char* argv[])
 {
-	mesh.readOBJ("cactus2.obj"); //armadillo-5k-smooth.obj female.obj david.obj rabbit.obj tyra.obj horse.obj cylinder.obj bar.obj planewithpeaks.obj dragon.obj catHead.obj  cactus.obj  bunny.obj  764_hand-olivier-10kf.obj armadillo.obj
+	mesh.readOBJ("cactus2.obj"); //cactus2.obj  armadillo.obj
 	mesh.CenterAndNormalize();
 	mesh.computeNormals();
 
-	meshLow.readOBJ("cactus1.obj"); //armadillo-5k-smooth.obj female.obj david.obj rabbit.obj tyra.obj horse.obj cylinder.obj bar.obj planewithpeaks.obj dragon.obj catHead.obj  cactus.obj  bunny.obj  764_hand-olivier-10kf.obj armadillo.obj
+	meshLow.readOBJ("cactus1.obj"); //cactus1.obj armadillo1.obj
 	meshLow.CenterAndNormalize();
 	meshLow.computeNormals();
 
@@ -395,20 +395,17 @@ int main(int argc, char* argv[])
 	handles.push_back(Handle(_dualSphere(c3gaPoint(.0, .04, -0.8) - 0.5*SQR(0.15)*ni)));
 
 	////cylinder.obj
-	//handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.0, 0.9, .0) - 0.5*SQR(0.25)*ni), false, P1)));
-	//handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.0, -0.9, .0) - 0.5*SQR(0.25)*ni), true, P2)));
+	//handles.push_back(Handle(_dualSphere(c3gaPoint(.0, 0.9, .0) - 0.5*SQR(0.25)*ni)));
+	//handles.push_back(Handle(_dualSphere(c3gaPoint(.0, -0.9, .0) - 0.5*SQR(0.25)*ni)));
 
-	//Armadillo Pie y Mano
-	//handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(-.5, 0.45, -.3) - 0.5*SQR(0.15)*ni), false, P1)));
-	//handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.2, -0.6, .1) - 0.5*SQR(0.15)*ni), true, P2)));
-	//Armadillo Pubis y Cabeza
-	//handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.0, 0.4, -.2) - 0.5*SQR(0.15)*ni), false, P1)));
-	//handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.0, -0.05, .1) - 0.5*SQR(0.15)*ni), true, P2)));
-
-	//handles[0]->extrema = 0;
-	//handles[1]->extrema = 1;
-	//extremas[0]->handle = 0;
-	//extremas[1]->handle = 1;
+	// //Armadillo foot and hand
+	// handles.push_back(Handle(_dualSphere(c3gaPoint(-.5, 0.45, -.3) - 0.5*SQR(0.15)*ni))); // hand
+	// handles.push_back(Handle(_dualSphere(c3gaPoint(.2, -0.6, .1) - 0.5*SQR(0.15)*ni))); // foot
+	// handles.push_back(Handle(_dualSphere(c3gaPoint(.45, 0.45, -.3) - 0.5*SQR(0.15)*ni))); // hand
+	// handles.push_back(Handle(_dualSphere(c3gaPoint(-.3, -0.6, .1) - 0.5*SQR(0.15)*ni))); // foot
+	// //Armadillo hip y head
+	// handles.push_back(Handle(_dualSphere(c3gaPoint(.0, 0.4, -.2) - 0.5*SQR(0.15)*ni)));
+	// handles.push_back(Handle(_dualSphere(c3gaPoint(.0, -0.05, .1) - 0.5*SQR(0.15)*ni)));
 
 	vertexDescriptorsLow.resize(meshLow.numVertices());
 	vertexDescriptors.resize(mesh.numVertices());
@@ -1201,8 +1198,8 @@ void MouseMotion(int x, int y)
 		}
 		if(g_rotateKeyRotors)
 		{
-			//rotor R1 =  _rotor( inverse(g_modelRotor) * exp(-g_camera.rotateVel * (motion ^ e3) ) * g_modelRotor);
-			rotor R1 =  _rotor( exp(-g_camera.rotateVel * (motion ^ e3) ) );
+			rotor R1 =  _rotor( inverse(g_modelRotor) * exp(-g_camera.rotateVel * (motion ^ e3) ) * g_modelRotor);
+			//rotor R1 =  _rotor( exp(-g_camera.rotateVel * (motion ^ e3) ) );
 			if(g_dragObject < handles.size())
 			{
 				rotor R = handles[g_dragObject].R;

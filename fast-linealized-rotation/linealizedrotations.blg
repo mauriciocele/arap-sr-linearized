@@ -1,0 +1,51 @@
+This is BibTeX, Version 0.99d (TeX Live 2020)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: linealizedrotations.aux
+The style file: abbrv.bst
+Database file #1: linealizedrotations.bib
+Repeated entry---line 904 of file linealizedrotations.bib
+ : @article{Pinkall1993
+ :                     ,
+I'm skipping whatever remains of this entry
+You've used 7 entries,
+            2118 wiz_defined-function locations,
+            546 strings with 4951 characters,
+and the built_in function-call counts, 2444 in all, are:
+= -- 234
+> -- 109
+< -- 2
++ -- 43
+- -- 36
+* -- 165
+:= -- 398
+add.period$ -- 21
+call.type$ -- 7
+change.case$ -- 38
+chr.to.int$ -- 0
+cite$ -- 7
+duplicate$ -- 96
+empty$ -- 202
+format.name$ -- 36
+if$ -- 523
+int.to.chr$ -- 0
+int.to.str$ -- 7
+missing$ -- 7
+newline$ -- 38
+num.names$ -- 14
+pop$ -- 46
+preamble$ -- 1
+purify$ -- 32
+quote$ -- 0
+skip$ -- 72
+stack$ -- 0
+substring$ -- 148
+swap$ -- 25
+text.length$ -- 2
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 26
+warning$ -- 0
+while$ -- 23
+width$ -- 8
+write$ -- 78
+(There was 1 error message)
