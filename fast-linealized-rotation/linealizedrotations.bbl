@@ -1,9 +1,26 @@
-\begin{thebibliography}{1}
+\begin{thebibliography}{10}
 
-\bibitem{Dorst2007}
-L.~Dorst, D.~Fontijne, and S.~Mann.
-\newblock {\em Geometric Algebra for Computer Science}.
-\newblock Morgan Kaufmann Publishers Inc., San Francisco, CA, USA, 2007.
+\bibitem{Chao2010}
+I.~Chao, U.~Pinkall, P.~Sanan, and P.~Schr\"{o}der.
+\newblock A simple geometric model for elastic deformations.
+\newblock In {\em ACM SIGGRAPH 2010 Papers}, SIGGRAPH '10, New York, NY, USA,
+  2010. Association for Computing Machinery.
+
+\bibitem{Chen2017}
+S.-Y. Chen, L.~Gao, Y.-K. Lai, and S.~Xia.
+\newblock Rigidity controllable as-rigid-as-possible shape deformation.
+\newblock {\em Graphical Models}, 91:13 -- 21, 2017.
+
+\bibitem{Jiang2017}
+T.~Jiang, K.~Qian, S.~Liu, J.~Wang, X.~Yang, and J.~Zhang.
+\newblock Consistent as-similar-as-possible non-isometric surface registration.
+\newblock {\em The Visual Computer}, 33:891--901, 2017.
+
+\bibitem{LeVaou2020}
+Y.~{Le Vaou}, J.-C. Léon, S.~Hahmann, S.~Masfrand, and M.~Mika.
+\newblock As-stiff-as-needed surface deformationcombining arap energy with an
+  anisotropic material.
+\newblock {\em Computer-Aided Design}, 121:102803, 2020.
 
 \bibitem{Levi2015}
 Z.~Levi and C.~Gotsman.
@@ -23,10 +40,24 @@ M.~C. Lopez~Belon.
 \newblock Available at {https://github.com/mauriciocele/arap-sr-linearized},
   2020.
 
+\bibitem{Morsucci2018}
+A.~Morsucci, M.~Centin, and A.~Signoroni.
+\newblock {Fast Centroidal Deformation for Large Mesh Models}.
+\newblock In M.~Livesu, G.~Pintore, and A.~Signoroni, editors, {\em Smart Tools
+  and Apps for Graphics - Eurographics Italian Chapter Conference}. The
+  Eurographics Association, 2018.
+
 \bibitem{Pinkall1993}
 U.~Pinkall, S.~D. Juni, and K.~Polthier.
 \newblock Computing discrete minimal surfaces and their conjugates.
 \newblock {\em Experimental Mathematics}, 2:15--36, 1993.
+
+\bibitem{Sorkine2007}
+O.~Sorkine and M.~Alexa.
+\newblock As-rigid-as-possible surface modeling.
+\newblock In {\em Proceedings of the fifth Eurographics symposium on Geometry
+  processing}, SGP '07, pages 109--116, Aire-la-Ville, Switzerland,
+  Switzerland, 2007. Eurographics Association.
 
 \bibitem{Ligare2020}
 J.~{Wu}, M.~{Lopez}, M.~{Liu}, and Y.~{Zhu}.

@@ -1151,3 +1151,69 @@ month={Sep.},}
 	URL = {https://doi.org/10.1109/TVCG.2014.2359463},
 }
 
+@inproceedings{Chao2010,
+author = {Chao, Isaac and Pinkall, Ulrich and Sanan, Patrick and Schr\"{o}der, Peter},
+title = {A Simple Geometric Model for Elastic Deformations},
+year = {2010},
+isbn = {9781450302104},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/1833349.1778775},
+doi = {10.1145/1833349.1778775},
+abstract = {We advocate a simple geometric model for elasticity: distance between the differential of a deformation and the rotation group. It comes with rigorous differential geometric underpinnings, both smooth and discrete, and is computationally almost as simple and efficient as linear elasticity. Owing to its geometric non-linearity, though, it does not suffer from the usual linearization artifacts. A material model with standard elastic moduli (Lam\'{e} parameters) falls out naturally, and a minimizer for static problems is easily augmented to construct a fully variational 2nd order time integrator. It has excellent conservation properties even for very coarse simulations, making it very robust.Our analysis was motivated by a number of heuristic, physics-like algorithms from geometry processing (editing, morphing, parameterization, and simulation). Starting with a continuous energy formulation and taking the underlying geometry into account, we simplify and accelerate these algorithms while avoiding common pitfalls. Through the connection with the Biot strain of mechanics, the intuition of previous work that these ideas are "like" elasticity is shown to be spot on.},
+booktitle = {ACM SIGGRAPH 2010 Papers},
+articleno = {38},
+numpages = {6},
+keywords = {elasticity, parameterization, morphing, discrete differential geometry, shape space interpolation, digital geometry processing, geometric modeling},
+location = {Los Angeles, California},
+series = {SIGGRAPH '10}
+}
+
+@inproceedings {Morsucci2018,
+booktitle = {Smart Tools and Apps for Graphics - Eurographics Italian Chapter Conference},
+editor = {Livesu, Marco and Pintore, Gianni and Signoroni, Alberto},
+title = {{Fast Centroidal Deformation for Large Mesh Models}},
+author = {Morsucci, A. and Centin, M. and Signoroni, A.},
+year = {2018},
+publisher = {The Eurographics Association},
+ISSN = {2617-4855},
+ISBN = {978-3-03868-075-8},
+DOI = {10.2312/stag.20181302}
+}
+
+@article{Chen2017,
+title = "Rigidity controllable as-rigid-as-possible shape deformation",
+journal = "Graphical Models",
+volume = "91",
+pages = "13 - 21",
+year = "2017",
+issn = "1524-0703",
+doi = "https://doi.org/10.1016/j.gmod.2017.02.005",
+url = "http://www.sciencedirect.com/science/article/pii/S1524070317300139",
+author = "Shu-Yu Chen and Lin Gao and Yu-Kun Lai and Shihong Xia",
+keywords = "Shape deformation, Rigidity, Neighborhood, Geometric modeling, As rigid as possible",
+abstract = "Shape deformation is one of the fundamental techniques in geometric processing. One principle of deformation is to preserve the geometric details while distributing the necessary distortions uniformly. To achieve this, state-of-the-art techniques deform shapes in a locally as-rigid-as-possible (ARAP) manner. Existing ARAP deformation methods optimize rigid transformations in the 1-ring neighborhoods and maintain the consistency between adjacent pairs of rigid transformations by single overlapping edges. In this paper, we make one step further and propose to use larger local neighborhoods to enhance the consistency of adjacent rigid transformations. This is helpful to keep the geometric details better and distribute the distortions more uniformly. Moreover, the size of the expanded local neighborhoods provides an intuitive parameter to adjust physical stiffness. The larger the neighborhood is, the more rigid the material is. Based on these, we propose a novel rigidity controllable mesh deformation method where shape rigidity can be flexibly adjusted. The size of the local neighborhoods can be learned from datasets of deforming objects automatically or specified by the user, and may vary over the surface to simulate shapes composed of mixed materials. Various examples are provided to demonstrate the effectiveness of our method."
+}
+
+@article{Jiang2017,
+  title={Consistent as-similar-as-possible non-isometric surface registration},
+  author={Tao Jiang and Kun Qian and Shuang Liu and Jing Wang and X. Yang and J. Zhang},
+  journal={The Visual Computer},
+  year={2017},
+  volume={33},
+  pages={891-901}
+}
+
+@article{LeVaou2020,
+title = "As-Stiff-As-Needed Surface DeformationCombining ARAP Energy with an Anisotropic Material",
+journal = "Computer-Aided Design",
+volume = "121",
+pages = "102803",
+year = "2020",
+issn = "0010-4485",
+doi = "https://doi.org/10.1016/j.cad.2019.102803",
+url = "http://www.sciencedirect.com/science/article/pii/S0010448519305354",
+author = "Youna {Le Vaou} and Jean-Claude Léon and Stefanie Hahmann and Stéphane Masfrand and Matthieu Mika",
+keywords = "Shape deformation, Anisotropy, Stiffness, As-rigid-as-possible, Shape design, Design review",
+abstract = "The creation of man-made shapes can be seen as the exploration of designers’ ‘Mental Shape Space’, often supported by design reviews. To improve communication among the designers during these reviews, we introduce a new physically-based method to intuitively deform man-made shapes. This method is based on as-rigid-as possible (ARAP) shape deformation methods, known to offer a direct surface manipulation and to generate visually pleasant shapes by minimizing local deviations from rigidity. However, the organic character of ARAP shape deformations leads to undesired effects, such as surface collapsing or bulging because of an inappropriate stiffness model over the object. In this paper, we first link the designers’ needs to ARAP handle-based variational mesh deformation processes. Then, we study and characterize the ARAP energy and its variants from a structural mechanics point of view. Our insight is that controlling the material stiffness could prevent the undesirable organic effects. Yet, we shed light on the fact that none of the ARAP-based methods offers an appropriate stiffness distribution over the object from a mechanical standpoint. We do so by introducing an appropriate anisotropic material, called orthotropic material, to improve the stiffness distribution over the surface and its deformation behavior for man-made shapes. This material is associated with a membrane-like structural behavior to further improve the stiffness distribution. Thanks to these settings, we derive a robust and intuitive deformation process that produces an anisotropic mesh deformation based on new edge weights in the ARAP formulation. The benefits of our new method are finally illustrated by typical design examples from the automotive industry and other man-made shapes."
+}

@@ -60,7 +60,7 @@
 %
 
 
-\title[Linear-Time Estimation of Smooth Rotations in ARAP Surface Deformation]
+\title[Linear-Time Estimation of Smooth Rotations in ARAP Deformation]
  {Linear-Time \\Estimation of Smooth Rotations in \\ARAP Surface Deformation}
 
 %----------Author 1
@@ -80,7 +80,7 @@
 
 \begin{abstract}
 
-In recent years the As-Rigid-As-Possible with Smooth Rotations (SR-ARAP \cite{Levi2015}) technique has gained popularity in applications where an isommetric-type of surface mapping is needed. The advantage of SR-ARAP is the quality of deformation results which is comparable to more costly volumetric techniques operating on tetrahedral meshes. However, the main drawback of this technique is its performance. The SR-ARAP relies on local/global optimization approach to minimize the non-linear least squares energy. The power of this technique resides on the local step. The local step estimates the best local rotation of a small region of surface, or cell, with respect of its neighboring cells so a local change in one cell's rotation affect the neighboring cell's rotations and viceversa. The local step requires a global convergence of rotation changes. Currently the local step is solved in an iterative fashion, where the number of iterations needed to reach convergence can be prohibitively large and so, in practice, only a fixed number of iterations is possible. This trade-off is, in some sense, defeating the goal of SR-ARAP. We propose a linear-time closed-form solution for estimating the codependent rotations of the local step by solving a sparse linear system of equations. Our method is more efficient than state-of-the-art since no iterations are needed and optimized sparse linear solvers can be leveraged to solve this step in linear time. It is also more accurate since it is a closed-form solution. We apply our method to generate interactive surface deformation, we also show how a multirresolution optimization can be applied to achieve real-time animation of large surfaces. 
+In recent years the As-Rigid-As-Possible with Smooth Rotations (SR-ARAP \cite{Levi2015}) technique has gained popularity in applications where an isommetric-type of surface mapping is needed. The advantage of SR-ARAP is that quality of deformation results is comparable to more costly volumetric techniques operating on tetrahedral meshes. The SR-ARAP relies on local/global optimization approach to minimize the non-linear least squares energy. The power of this technique resides on the local step. The local step estimates the local rotation of a small surface region, or cell, with respect of its neighboring cells, so a local change in one cell's rotation affect the neighboring cell's rotations and viceversa. The main drawback of this technique is that the local step requires a global convergence of rotation changes. Currently the local step is solved in an iterative fashion, where the number of iterations needed to reach convergence can be prohibitively large and so, in practice, only a fixed number of iterations is possible. This trade-off is, in some sense, defeating the goal of SR-ARAP. We propose a linear-time closed-form solution for estimating the codependent rotations of the local step by solving a sparse linear system of equations. Our method is more efficient than state-of-the-art since no iterations are needed and optimized sparse linear solvers can be leveraged to solve this step in linear time. It is also more accurate since this is a closed-form solution. We apply our method to generate interactive surface deformation, we also show how a multirresolution optimization can be applied to achieve real-time animation of large surfaces. 
 
 \end{abstract}
 
@@ -90,52 +90,18 @@ In recent years the As-Rigid-As-Possible with Smooth Rotations (SR-ARAP \cite{Le
 %\tableofcontents
 \section{Introduction}
 
-\indent Quatily of surface deformation aim to preserve local properties of shapes as much as possible, removing distortion in the form of shear and stretch. As-Rigid-As-Possible with Smooth Rotations (SR-ARAP) aims to create a surface mapping that minimize the deviation from rigid behavior on the local scale. It also makes that rigid transformations vary smoothly on local neighborhoods distributing the distortions  uniformly over the surface. The resulting deformations not only preserves the shape at small scale but also at large scale significantly increasing the quality of the final result.
+\indent Quatily of surface deformation aims to preserve local properties of shapes as much as possible, removing distortion in the form of shear and stretch. As-Rigid-As-Possible with Smooth Rotations (SR-ARAP) \cite{Levi2015} aims to create a surface mapping that minimize the deviation from rigid behavior on the local scale. It also makes rigid transformations smoothly vary on local neighborhoods distributing the distortions  uniformly over the surface. The resulting deformations not only preserves the shape at small scale but also at large scale significantly increasing the quality of the final result.
 
-There are two main disadvangates on the current SR-ARAP method. First is the local step, which looks for best rotations of corresponding surface cells while keeping neighbor rotations similar to each other. It needs to reach global convergence for the whole mesh. Currently the local step is solved with a relaxation method i.e., optimizing rotations for individual cells keeping cell's neighbor rotations as constant and also optimizing neighbor rotations in the same manner repeating that process until convergence. Although the cost per relaxation iteration can be reduced considerably by avoiding SVD calculations (\cite{Ligare2020}) usually a fixed number of iterations is used in order to bound the solver time. That compromise weaks the purpose of SR-ARAP i.e, the uniform distribution of distortions over the surface, since the reduced number of iterations (usually two or three) might be not enough to reach optimal rotations across the surface. Second is the high computational cost, that increases drastically when the number of vertices grows. The SR-ARAP is a non-linear technique that requires several iterations of local/global optmimization to converge.
+There are two main disadvangates on the current SR-ARAP method. First is the local step, which looks for best rotations of corresponding surface cells while keeping neighbor rotations similar to each other. It needs to reach global convergence for the whole mesh. Currently the local step is solved with a relaxation method i.e., optimizing rotations for individual cells keeping cell's neighbor rotations fixed and also optimizing neighbor rotations in the same manner repeating that process until convergence. Although the cost per relaxation iteration can be reduced considerably by avoiding SVD calculations (\cite{Ligare2020}) usually a fixed number of iterations is used in order to bound the solver time. That compromises the quality of results since a fixed number of iterations (usually two or three) is not enough to reach optimal rotations across the surface. Second is the high computational cost, that increases drastically when the number of vertices grows. The SR-ARAP is a non-linear technique that requires several iterations of local/global optmimization to converge.
 
 In this paper we address both drawbacks of SR-ARAP, first we propose a method to solve the local step as a single linear system of equations, avoiding the need of iteratively solve a series of SVD problems which are codependant to each other. Second we propose a simple multiresolution method based on solving the non-linear system on a simplified surface mesh first and then use harmonic interpolation of rotations to transfer the optimized rotations to the full resolution mesh, leveraging the Laplacian matrix needed to solve the global step of the optimization.
 
-To find the best rotations matching two sets of vectors in a global manner we use the mathematical framework of Geometric Algebra (GA) since the treatment of rotations is simpler than quaternions framework. Quaternions are isomorphic to GA rotors so implementation of this method in terms of quaternions is trivial.
 
 \section{Related Work}
 
-\section{Geometric Algebra $\mathbb{G}_3$}
+Since the focus of this paper is on As-Rigid-As-Possible (ARAP) surface deformation methods we will only review previous works on ARAP deformation. The ARAP Surface Modeling was introduced by Sorkine and Alexa \cite{Sorkine2007} to produce robust and physically plausible deformation by minimizing the local rigid transformation of the laplacian coordinates associated to every vertex. Although results on low resolution meshes looks close to physical deformations the method fails to achieve satisfactory results  on high resolution meshes. The reason is that the ARAP energy is minimized by preserving rigidity on large parts of the mesh at the expense of concentrating all the distortion on small parts of the mesh. This problem has been solved in the Smooth Rotation enhanced ARAP method (SR-ARAP) of Levi and Gotsman \cite{Levi2015} where the deformation energy is extended with a further factor that penalizes too different rotations of close vertices, significantly increasing the quality of the final result. Chao \emph{et al} \cite{Chao2010} derives the ARAP enegry from the elastic energy of continuum mechanics showing a consistent discretization for volumetric ARAP with tetrahedron cells and for 2D ARAP with triangle cells in 2D. However the ARAP energy doesn't have a consistent discretization for triangle surfaces in 3D. The SR-ARAP method  \cite{Levi2015} also address this issue providing an energy with a consistent discretization for surfaces in 3D. Further enhancements have been proposed to the SR-ARAP deformation technique addressing performance issues on large meshes \cite{Morsucci2018, Ligare2020}, making it able to adjust physical stiffness \cite{Chen2017, LeVaou2020} and Introducing local scaling to the rotation i.e., turning rigid transforms into a similarity transforms \cite{Jiang2017}.
 
-A thorough introduction to Geometric Algebra is out of the scope of this paper (we refer the reader to \cite{Dorst2007} for an in-depth introduction). In this section we shortly introduce the relevant GA elements relevant to our work. 
 
-The geometric algebra $\mathbb{G}_{3,0,0}$ is constructed over a real vector space $\mathbb R^3$, with basis vectors $\{e_1, e_2, e_3\}$. The associative geometric product is defined on vectors so that the square of any vector $a$ is a scalar $a a = a^2 \in \mathbb{R}$ and the geometric product of two vectors $a$ and $b$ is $a b = a \cdot b + a \wedge b$ and $b a = b \cdot a - a \wedge b$. From the vector space $\mathbb R^3$, the geometric product generates the geometric algebra $\mathbb{G}_{3,0,0}$ with elements $\{ X, R, A...\}$ called multivectors.
-
-For a pair of vectors $a$ and $b$, a symmetric inner product $a \cdot b = b \cdot a$ and antisymmetric outer product $a \wedge b = -b \wedge a$ can be defined implicitly by the geometric product. It is easy to prove that $a \cdot b = \frac{1}{2}(a b + b a)$ is a scalar, while the quantity $a \wedge b = \frac{1}{2}(a b - b a)$, called a bivector or $2$-vector, is a new algebraic entity that can be visualized as the two-dimensional analogue of a direction i.e., a planar direction. Similar to vectors, bivectors can be decomposed in a bivector basis $\{ e_{12}, e_{13}, e_{23} \}$ where $e_{ij} = e_i \wedge e_j$.
-
-The outer product of three vectors $a \wedge b \wedge c$ generates a $3$-vector also known as the pseudoscalar, because the trivector basis consist of single element $e_{123} = e_1 \wedge e_2 \wedge e_3$. Similarly, the scalars are regarded as $0$-vectors whose basis is the number $1$. It follows that the outer product of $k$-vectors is the completely antisymmetric part of their geometric product: $a_1 \wedge a_2 \wedge ... \wedge a_k = \langle a_1 a_2 ... a_k \rangle_k$ where the angle bracket means $k$-vector part, and $k$ is its grade. The term grade is used to refer to the number of vectors in any exterior product. This product vanishes if and only if the vectors are linearly dependent. Consequently, the maximal grade for nonzero $k$-vectors is $3$. It follows that every multivector $X$ can be expanded into its $k$-vector parts and the entire algebra can be decomposed into $k$-vector subspaces:
-\begin{equation*}
-\mathbb G_3 = \sum_{k=0}^3{\mathbb{G}^k_3} = \{ X = \sum_{k=0}^3 { \langle X \rangle_k } \}
-\end{equation*}
-This is called a \emph{grading} of the algebra. 
-
-Reversing the order of multiplication is called reversion, as expressed by $(a_1 a_2 ... a_k)\tilde{} = a_k ... a_2 a_1$ and $(a_1 \wedge a_2 \wedge ... \wedge a_k)\tilde{} = a_k \wedge ... \wedge a_2 \wedge a_1$, and the reverse of an arbitrary multivector is defined by $\tilde{X} = \sum_{k=0}^3 { \langle \tilde{X} \rangle_k }$.
-
-\subsection{Rotors}
-
-Rotations are even grade multivectors known as rotors. We denote the subalgebra of rotors as $\mathbb{G}^{+}_3$. A rotor $R$ can be generated as the geometric product of an even number of vectors. A reflection of any $k$-vector $X$ in a plane with normal $n$ is expressed as the sandwitch product $(-1)^k n X n$. The most basic rotor $R$ is defined as the product of two unit vectors $a$ and $b$ with angle of $\frac{\theta}{2}$. The rotation plane is the bivector $B = \frac{a \wedge b}{\| a \wedge b \|}$.
-\begin{equation}
-a b = a \cdot b + a \wedge b = \cos\left( \frac{\theta}{2} \right) + B \sin\left( \frac{\theta}{2} \right).
-\end{equation}
-Rotors act on all $k$-vectors using the sandwitch product $X' = R X \tilde R$, where $\tilde R$ is the reverse of $R$ and can be obtained by reversing the order of all the products of vectors.
-
-\subsection{Bivector products}
-
-We define the commutator product of two bivectors $A$ and $B$ as $A \times B = \frac{1}{2}(A B - B A)$. The commutator product of bivectors in $\mathbb{G}_3$  can be interpreted as a cross-product of bivectors i.e., the resulting bivector $C = A \times B$ is orthogonal to both $A$ and $B$. The commutator product allow us to define the geometric product of two bivectors as $A B = A \cdot B + A \times B$. The inner product of bivectors differs from the inner product of vectors on the sign, since the square of bivectors is negative, the inner product of bivectors is a negative scalar e.g., $(a e_{12} + b e_{13} + c e_{23}) \cdot (d e_{12} + e e_{13} + f e_{23}) = -a d - b e - c f$.
-
-\subsection{Quaternions}
-
-A quaternion $Q = w + \vec v$ consists of two parts: a scalar part $w$ and vector part $\vec v$ which denotes the axis of rotation. The vector part $\vec v$ is defined in a basis of complex vectors $\{ i, j, k \}$ that squares to $-1$ and anticommute i.e., $i^2 = j^2 = k^2 = -1$ and $i j k = -1$. In geometric algebra they corresponds to bivectors:
-\begin{eqnarray}
-i = e_{23} \ \ \ j = e_{13} \ \ \  k = e_{12} \\
-ijk = e_{23} e_{13} e_{12} = -1 \nonumber
-\end{eqnarray}
-Rotors can easily be transformed to quaternions and vice versa. A rotor $R = w + B$ corresponds with a quaternion $Q = w + \vec v$, where $B = \alpha e_{12} + \beta e_{13} + \gamma e_{23}$ and $\vec v = \gamma i + \beta j + \alpha k$.
 
 \section{As-Rigid-As-Possible Shape Deformation with Smooth Rotations}
 
@@ -144,14 +110,14 @@ Given two meshes $Q$ and $P$ consisting of vertices $q_i$ and $p_i$ respectively
 E(Q, P) = \sum_{i=1}^m { (\sum_{j \in N(i)} { c_{ij} \|R_i (q_j - q_i) \tilde R_i - (p_j - p_i)  \|^2 } \nonumber \\
 + \alpha A \sum_{j \in N(i)} {w_{ij} \| R_j - R_i \|^2} )}\nonumber
 \end{equation}
-where $R_1, ..., R_m \in \mathbb{G}^{+}_3$ are local rotors, $N(i)$ denote the set of $1$-ring neighbors of vextext at position $i$, $c_{ij}$ are weighting coefficients such that $\sum_j^n{c_{ij}} = 1$, typically the familiar cotangent weights, $w_{ij}$ are positive weighting coefficients such that $\sum_j^n{w_{ij}} = 1$, $A$ is the mesh area used to make the energy scale invariant and $\alpha$ is a positive scalar parameter.
+where $R_1, ..., R_m \in \mathbb{H}$ are local quaternions, $N(i)$ denote the set of $1$-ring neighbors of vertex at position $i$, $c_{ij}$ are weighting coefficients such that $\sum_j^n{c_{ij}} = 1$, typically the familiar cotangent weights, $w_{ij}$ are positive weighting coefficients such that $\sum_j^n{w_{ij}} = 1$, $A$ is the mesh area used to make the energy scale invariant and $\alpha$ is a positive scalar parameter.
 
 The main idea of this method is breaking the surface into overlapping cells and seek for keeping the cells transformations as rigid as possible in the least squares sense. Overlap of the cells is necessary to avoid surface stretching or shearing at the boundary of the cells. 
 The first term is a membrane energy which penalizes stretching and shearing of a cell and the second term is the bending energy which penalizes the difference between a cell's rotation and the rotations of its neighboring cells. 
 The objective of the membrane term is to lower the distortion of a cell by keeping the map differential close to rigid. 
 The objective of the bending term is to keep the variation in the rotations in a cell neighborhood low, such that the neighborhood would transform as a unit, as much as possible. 
 
-The vertices of mesh $Q$ are in original position while vertices of mesh $P$ are the deformed vertices and the rotor $R_i$ is the best rigid transformation, in the least squares sense, relating the original and the deformed vertices.
+The vertices of mesh $Q$ are in original position while vertices of mesh $P$ are the deformed vertices and the quaternion $R_i$ is the best rigid transformation, in the least squares sense, relating the original and the deformed vertices.
 This is a non-linear optimization problem that is tipically solved by a iterative local/global method that solves two linear sub-problems on each iteration. 
 
 The first step, so called local step, is to consider the vertices of $P$ constant and obtain the best rigid transformation $R_i$ for each cell. The second step, so called global step, is to consider the rotations $R_i$ constant and computing the optimal deformed vertices $p_i$ in the least squares sense. 
@@ -168,48 +134,48 @@ Taking the partial derivatives of $E(P)$ w.r.t. $p_i$ and equating the result to
 \label{eq:ls_for_p_ga}
 \sum_{j \in N(i)} { c_{ij} (p_j - p_i) } = \sum_{j \in N(i)} { \frac{c_{ij}}{2} (R_i q_{ij} \tilde  R_i + R_j q_{ij} \tilde R_j) }
 \end{eqnarray}
-which can be expressed in matrix form as $\mathrm L \; \mathrm P = \mathrm C$, where $\mathrm L$ is the symmetric Laplace-Beltrami operator, $\mathrm P$ is the column of target positions and $\mathrm C$ is the right hand side of Equation (\ref{eq:ls_for_p_ga}). Constraints of the form $p_i = p^{const}_i$ are incorporated into the system by substituting the corresponding variables i.e., erasing respective rows and columns from $\mathrm L$ and updating the right-hand side with the values $c_i$. The system is then solved in the least squares sense:
+which can be expressed in matrix form as $\mathrm L \; \mathrm P = \mathrm C$, where $\mathrm L$ is the discrete Laplace-Beltrami operator, $\mathrm P$ is the column of target positions and $\mathrm C$ a column vector whose $i$th row is the right hand side of equation (\ref{eq:ls_for_p_ga}). Constraints of the form $p_i = p^{const}_i$ are incorporated into the system by substituting the corresponding variables i.e., erasing respective rows and columns from $\mathrm L$ and updating the right-hand side of equation (\ref{eq:ls_for_p_ga}) with the values $p^{const}_i$. The system is then solved in the least squares sense:
 \begin{eqnarray}
 (\mathrm L^T \mathrm L) \; \mathrm P = \mathrm L^T \ \mathrm C
 \end{eqnarray}
 
 \section{Local Step}
 
-As described in a previous sections, the rotations matching cell's are codependent to each other over the whole mesh. The current approach is to optimize the rotations with a relaxation method in which the rotation of each cell independently, while keeping the neighbor rotations fixed, repeating it until convergence. At least two relaxation iterations should be done per each global iteration. In this section we show how the local step can be solved in closed form as a single sparse linear system eliminating entirely the need to relaxation iterations.
+As described in a previous sections, the rotations matching cell's are codependent to each other over the whole mesh. The current approach is to optimize the rotations with a relaxation method in which the rotation of each cell is independently computed, while keeping the neighbor rotations fixed, repeating it until global convergence is reached. At least two relaxation iterations must be done per each global iteration. In this section we show how the local step can be solved in closed form as a single sparse linear system eliminating entirely the need of relaxation iterations.
 
 \subsection{Closed Form of Local Step}
 
-We attempt to minimize the following energy function:
+We attempt to minimize the SR-ARAP energy function:
 \begin{eqnarray}
-E(R) = \min_{R_1,...,R_m \in \mathbb G^3} \sum_{i=1}^m  (  \sum_{j \in N(i)} { c_{ij} \|R_i q_{ij} \tilde R_i -  p_{ij}\|^2 } \\
+E(R) = \min_{R_1,...,R_m \in \mathbb H} \sum_{i=1}^m  (  \sum_{j \in N(i)} { c_{ij} \|R_i q_{ij} \tilde R_i -  p_{ij}\|^2 } \\
 + \alpha A \sum_{j \in N(i)} { w_{ij} \|R_i - R_j\|^2 } )
 \end{eqnarray}
 
-The energy to minimize in the neighborhood of point $p_i$ is the SR-ARAP energy $E_i(R_i)$:
+Ignoring temporarily the sum over all vertices, the energy to minimize in the neighborhood of a point $p_i$ is $E_i(R_i)$:
 
 \begin{eqnarray}
 E_i(R_i) =  \sum_{j \in N(i)} { c_{ij} \|R_i q_{ij} \tilde R_i - p_{ij}  \|^2 } + \alpha A \sum_{j \in N(i)} {w_{ij} \| R_j - R_i \|^2} \nonumber
 \end{eqnarray}
 Notice that the first term $\sum_{j \in N(i)} { c_{ij} \|R_i q_{ij} \tilde R_i - p_{ij}  \|^2 } $ can be written in matrix language as the quadratic form $R_i^T M_i R_i$ where $M_i$ is a $4\times4$ matrix constructed from vectors $q_{ij}$ and $p_{ji}$ (see Section \ref{section:the_form_of_arap_matrix}):
 \begin{eqnarray}
-		E_i(R_i) = R_i^T M_i R_i + \alpha A \sum_{j \in N(i)} {w_{ij} \| R_j - R_i \|^2  }\\
+		E_i(R_i) = R_i^T M_i R_i + \alpha A \sum_{j \in N(i)} {w_{ij} \| R_j - R_i \|^2  }\\ \nonumber
 \end{eqnarray}
 
 Differentiating with respect to $R_i$ we get:
 \begin{eqnarray}
 	\label{eqn:max_energy}
 	\frac{\partial E_i(R_i)}{\partial R_i}  = 2 M_i R_i + 2 \alpha A \sum_{j \in N(i)} {w_{ij} (R_i - R_j) }\\
-	= M_i R_i + \alpha A R_i - \alpha A \sum_{j \in N(i)} {w_{ij} R_j }
+	= M_i R_i + \alpha A R_i - \alpha A \sum_{j \in N(i)} {w_{ij} R_j } 
 \end{eqnarray}
 
 Setting the partial derivatives to zero $\frac{\partial E_i(R_i)}{\partial R_i}  = 0$
 
 \begin{eqnarray}
 	\label{eqn:local_solution}
-	(M_i + \alpha A I)R_i  = \alpha A \sum_{j \in N(i)} {w_{ij} R_j }\\
+	(M_i + \alpha A I)R_i  = \alpha A \sum_{j \in N(i)} {w_{ij} R_j }\\ \nonumber
 \end{eqnarray}
 
-Which is a linear system of equations. The system \ref{eqn:local_solution} can be solved for all rotors in closed form. Writting \ref{eqn:local_solution} in matrix form we get:
+Which is a linear system of equations. The system (\ref{eqn:local_solution}) can be solved for all quaternions in closed form. Writing (\ref{eqn:local_solution}) in matrix form we get:
 
 \begin{eqnarray}
 	\label{eqn:local_solution_closed_form}
@@ -217,30 +183,32 @@ Which is a linear system of equations. The system \ref{eqn:local_solution} can b
 	(\mathrm M - \mathrm W) \mathrm R = \mathrm 0
 \end{eqnarray}
 
-Where $\mathrm M$ is a symmetric sparse  matrix  with dimensions $4n\times 4n$ which is stacking $M_i$ at its diagonal, $\mathrm W$ is a discrete Laplacian matrix with dimensions $4n\times 4n$ derived from RHS of \ref{eqn:local_solution} i.e., $\sum_{j \in N(i)} {\alpha A w_{ij} R_j }$ holding the coefficients $\alpha A w_{ij}$. $\mathrm R$ is column matrix of dimensions $1\times 4n$ stacking the coefficients of rotors $R_i$.
+Where $\mathrm M$ is a symmetric sparse  matrix  with dimensions $4n\times 4n$ which is stacking $M_i$ at its diagonal, $\mathrm W$ is a discrete Laplacian matrix with dimensions $4n\times 4n$ derived from RHS of (\ref{eqn:local_solution}) i.e., $\sum_{j \in N(i)} {\alpha A w_{ij} R_j }$ holding the coefficients $\alpha A w_{ij}$. $\mathrm R$ is column matrix of dimensions $1\times 4n$ stacking the coefficients of quaternions $R_i$.
 
-The linear system can be solved my imposing rotor constraints $R^{const}_i$ which corresponds to best rotation of constrained points $p^{const}_i$:
+The sparse linear system of (\ref{eqn:local_solution_closed_form}) can be solved by imposing quaternion constraints $R^{const}_i$ which corresponds to best rotation of constrained points $p^{const}_i$:
 \begin{eqnarray}
 	\label{eqn:local_solution_closed_form_const}
 	(\mathrm M - \mathrm W) \mathrm R = \mathrm 0\\
 	s.t. \ R_i = R^{const}_i \nonumber
 \end{eqnarray}
 
-Since the constraint $R_i^T R_i = 1$ is not honored by the linear system the rotor $R_i$ given as solution must be normalized. As shown in \cite{Ligare2020} the solution of \ref{eqn:local_solution} gives a approximate solution to the optimal rotor. Our results confirm that the proposed linearization is not affecting accuracy in any significant way.
+Constraints of the form $R_i = R^{const}_i$ are incorporated into the system by substituting the corresponding variables i.e., erasing respective rows and columns from $(\mathrm M - \mathrm W)$ and updating the right-hand side of (\ref{eqn:local_solution_closed_form_const}) with the values $R^{const}_i$. The system is then solved in the least squares sense.
+
+Since the constraint $R_i^T R_i = 1$ is not honored by the linear system the quaternion $R_i$ given as solution must be normalized. As shown in \cite{Ligare2020} the solution of (\ref{eqn:local_solution}) gives a linear approximate solution to the optimal quaternion in the least squares sense. Our results confirm that the proposed linearization is accurate for the SR-ARAP rotations and it is not affecting accuracy in any significant way.
 
 \subsection{Rotation constraints $R^{const}_i$}
 
-The rotation constraints $R^{const}_i$ in \ref{eqn:local_solution_closed_form_const} have to be computed from equation \ref{eqn:local_solution} for each constrained point $p^{const}_i$:
+The rotation constraints $R^{const}_i$ in (\ref{eqn:local_solution_closed_form_const}) have to be computed directly from equation (\ref{eqn:local_solution}) for each constrained point $p^{const}_i$:
 \begin{equation}
 	R^{const}_i  = (M_i + \alpha A I)^{-1}  \sum_{j \in N(i)} {\alpha A w_{ij} R^{prev}_j } \nonumber
 \end{equation}
-where neighbor rotations $R^{prev}_j$ are known from previous iteration. So computing constraint rotors amounts to solve a small $4\times4$ linear system. The resulting rotor $R^{const}_i$ must be normalized.
+where neighbor rotations $R^{prev}_j$ are known from previous iteration. So computing constraint quaternionss amounts to solve a small $4\times4$ linear system. The resulting quaternion $R^{const}_i$ must be normalized.
 
  \subsection{Rotation's Feedback}
  
-The linear system of \ref{eqn:local_solution_closed_form_const} find rotors from scratch i.e., it doesn't take into account the previous state of the rotors. That might lead to undesired results in an animation sequence. The sense of the rotations found by \ref{eqn:local_solution_closed_form_const} for some animation step are not always respecting the sense of previous rotations. The abrupt change in the sense of rotation cause animation artifacts specially for large rotations.
+The linear system of (\ref{eqn:local_solution_closed_form_const}) find quaternions from scratch i.e., it doesn't take into account the previous state of the quaternions i.e., the temporal coherence. That might lead to undesired results in an animation sequence. In particular, the sense of the rotations found by (\ref{eqn:local_solution_closed_form_const}) for some animation step are not always respecting the sense of rotations from previous time. The abrupt change in the sense of rotation cause animation artifacts specially for large rotations.
 
-The equation \ref{eqn:local_solution_closed_form_const} allow us to introduce \emph{feedback} rotors to the RHS which acts as \emph{hints} to find rotors close to the ones in previous iteration. Given the rotor $R^{prev}_i$ and a positive small scalar value $\epsilon_i$ we augment equation \ref{eqn:local_solution} in the following way:
+The equation (\ref{eqn:local_solution_closed_form_const}) allow us to introduce \emph{feedback} quaternions to the RHS which acts as \emph{hints} to find quaternions close to the ones in previous iteration. Given the quaternion $R^{prev}_i$ and a positive small scalar value $\epsilon_i$ we augment equation (\ref{eqn:local_solution}) in the following way:
 
 \begin{eqnarray}
 	\label{eqn:local_solution_feedback}
@@ -251,21 +219,21 @@ where  $\sum_{j \in N(i)} {w_{ij}} = 1-\epsilon$. Our intention is to make $R_i$
 	(\mathrm M - \mathrm W) \mathrm R = \epsilon \mathrm R^{prev}\\
 	s.t. \ R_i = R^{const}_i \nonumber
 \end{eqnarray}
-where $\mathrm R^{prev}$ is a $1\times4n$ column vector stacking all the unconstrained rotors $R^{prev}_i$ from previous iteration.
+where $\mathrm R^{prev}$ is a $1\times4n$ column vector stacking all the unconstrained quaternions $R^{prev}_i$ from previous iteration.
 
 \section{Multiresolution Optimization}
 
 For achieving real-time performance we optimize the SR-ARAP energy in a low resolution version of the input mesh and then we transfer that solution to the full resolution mesh. To obtain the low resolution mesh we simplify the mesh using \emph{half edge collapses} (i.e., the simplified mesh is a triangulation of a subset of the original vertices) while minimizing the Quadrics error metric.
-After we obtained the optimal deformed shape on the simplified mesh we transfer the optimized rotations to the full resolution mesh using Harmonic Interpolation of rotors (see Section \ref{section:harmonic_interpolation_rotors}) and then solve the following linear system using the optimized vertices of the low resolution mesh as positional constraints:
+After we obtained the optimal deformed shape on the simplified mesh we transfer the optimized rotations to the full resolution mesh using Harmonic Interpolation of quaternions (see Section \ref{section:harmonic_interpolation_rotors}) and then solve the following linear system using the optimized vertices of the low resolution mesh as positional constraints:
 \begin{eqnarray*}
 \sum_{j \in N(i)} { c_{ij} (p_j - p_i) } = \sum_{j \in N(i)} { \frac{c_{ij}}{2} (R_i q_{ij} \tilde  R_i + R_j q_{ij} \tilde R_j) }
 \end{eqnarray*}
 
-\subsection{Harmonic Interpolation of Rotors}
+\subsection{Harmonic Interpolation of Quaternions}
 \label{section:harmonic_interpolation_rotors}
 
-The seminal work of Pinkall and Polthier \cite{Pinkall1993} shows how to interpolate given data over a discrete domain using harmonic maps. Harmonic maps are critical points of the Dirichlet energy (stretching energy) $\int_{\Omega}{ |\nabla f|^2 dA }$, which generates minimal surfaces \cite{Pinkall1993}. 
-The \emph{discrete harmonic energy} \cite{Pinkall1993} of a map $f$ defined on mesh vertices $\{p_i\}$ has the form:
+The seminal work of Pinkall and Polthier \cite{Pinkall1993} shows how to interpolate given data over a discrete domain using harmonic maps. Harmonic maps are critical points of the Dirichlet energy (stretching energy) $\int_{\Omega}{ |\nabla f|^2 dA }$, which generates minimal surfaces. 
+The \emph{discrete harmonic energy} of a map $f$ defined on mesh vertices $\{p_i\}$ has the form:
 \begin{equation}
 E(f) = \sum_{i,j}{c_{ij} \| f(p_j) - f(p_i) \|^2 }
 \end{equation}
@@ -273,28 +241,26 @@ where $w_{ij}$ are the (symmetric) cotangent weights \cite{Pinkall1993} defined 
 \begin{equation}
 \Delta f = \sum_{j \in N_i} { c_{ij} ( f(p_j) - f(p_i) ) }
 \end{equation}
-where $N_i$ is the set of indices of the neighbors of vertex $p_i$. It is known that harmonic energy minimizes angular distortions. That means that harmonic functions smoothly blend boundary conditions over the domain. Harmonic functions are intrinsic to surfaces and independent of the discretization used to produce meshes. In spirit similar to \cite{Zayer2005}, we propose the interpolation of rotors over a mesh using harmonic functions. The harmonic rotor interpolation over a surface mesh can be formulated as the solution to the following discrete harmonic equation:
+where $N_i$ is the set of indices of the neighbors of vertex $p_i$. It is known that harmonic energy minimizes angular distortions. That means that harmonic functions smoothly blend boundary conditions over the domain. Harmonic functions are intrinsic to surfaces and independent of the discretization used to produce meshes. In spirit similar to \cite{Zayer2005}, we propose the interpolation of quaternions over a mesh using harmonic functions. The harmonic quaternion interpolation over a surface mesh can be formulated as the solution to the following discrete harmonic equation:
 \begin{eqnarray}
 \label{eq:harmonic_rotor}
    \sum_{j \in N(i)} { c_{ij} ( R_j - R_i ) } = 0
 \end{eqnarray}
-subject to Dirichlet boundary conditions $R_k = R^{const}_k$, where $\{R^{const}_k\}$ are the optimized rotors from the lower resolution mesh and $\{c_{ij}\}$ are the cotangent weights. This leads to the solution of a sparse linear matrix system. This interpolation produces a smooth field of rotors by ``averaging'' the boundary conditions gradually over the surface. This is in effect equivalent to a linear interpolation of boundary conditions across the surface. It can be written in matrix form as:
+subject to Dirichlet boundary conditions $R_k = R^{const}_k$, where $\{R^{const}_k\}$ are the optimized quaternions from the lower resolution mesh and $\{c_{ij}\}$ are the cotangent weights. This leads to the solution of a sparse linear matrix system. This interpolation produces a smooth field of quaternions by ``averaging'' the boundary conditions gradually over the surface. This is in effect equivalent to a linear interpolation of boundary conditions across the surface. It can be written in matrix form as:
 \begin{eqnarray}
 	\mathrm L \; \mathrm R = 0\\
 	s.t. \ R_k = R^{const}_k \nonumber
 \end{eqnarray}
-where $\mathrm L$ is discrete Laplacian operator used to solve the global step.
+where $\mathrm L$ is discrete Laplacian operator used to solve the global step. Note that interpolated quaternons are not of unit length and must be normalized afterwards. Despite the simplicity of this approach, it works surprisingly well, it is extremely efficient, and it provides a natural propagation at no extra cost.
 
  \section{The form of $M_i$}
  \label{section:the_form_of_arap_matrix}
- 
-In this section we primarily work with bivectos instead of vectors for the sake of mathematical convenience as the geometric product of bivectors contains other bivector. Due to mathematical (and geometric) duality of vectors and bivectors in $\mathbb{G}_3$ our formulation is also valid for vectors. Let $q_{ij}$ be a bivector defined as $q_{ij} = (q_j - q_i) \cdot \tilde I$ and  $p_{ij}$ be a bivector defined as $p_{ij} = (p_j - p_i)  \cdot  \tilde I$ where $\tilde I$ is the reversed pseudoscalar defined as $\tilde I = e_{321}$.
 
-Notice that the membrane term $\sum_j \|R_i q_{ij} \tilde R_i - p_{ij} \|^2$ is equivalent to $\sum_j  \|R_i q_{ij} - p_{ij} R_i\|^2$ under the L2 norm. Also notice that  $R_i q_{ij} - p_{ij} R_i$ can be rewriten as $(w_i + B_i) q_{ij}  - p_{ij} (w_i + B_i)$ for some a scalar $w_i$ and bivector $B_i$ such that $R_i = w_i + B_i$. Expanding the geometric product of bivectors in terms of the inner product and the communtator product we get:
+Notice that the membrane term $\sum_j \|R_i q_{ij} \tilde R_i - p_{ij} \|^2$ is equivalent to $\sum_j  \|R_i q_{ij} - p_{ij} R_i\|^2$ under the L2 norm. Also notice that  $R_i q_{ij} - p_{ij} R_i$ can be rewriten as $(w_i + B_i) q_{ij}  - p_{ij} (w_i + B_i)$ for some a scalar $w_i$ and pure quaternion $B_i$ such that $R_i = w_i + B_i$. Expanding the quaternion product in terms of the inner product and the cross product we get:
 \begin{eqnarray}
-	(q_{ij} - p_{ij}) w_i - (q_{ij} - p_{ij}) \cdot B_i - (q_{ij} + p_{ij}) \times B_i
+     (q_{ij} - p_{ij}) w_i - (q_{ij} - p_{ij}) \cdot B_i - (q_{ij} + p_{ij}) \times B_i
 \end{eqnarray}
-This geometric algebra expression above can be defined in matrix language following the matrix system $M_{ij} R_i$:
+The expression above can be written in matrix form to get the matrix system $M_{ij} R_i$:
 \begin{eqnarray}
 	M_{ij} R_i =
 	\left[\begin{array}{cc}
@@ -311,7 +277,7 @@ This geometric algebra expression above can be defined in matrix language follow
 	\end{array}\right]\\
 	d_{ij} = q_{ij} - p_{ij} \ \ s_{ij} = p_{ij} + q_{ij}  \nonumber
 \end{eqnarray}
-where $d_{ij}$ and $s_{ij}$ are $3 \times 1$ column vectors holding bivector's coefficients, $M_{ij}$ is a skew-symmetric $4\times 4$ real matrix, so that $M_{ij}^T = -M_{ij}$. The rotor $R_i$ is represented as $4 \times 1$ column vector made of the scalar $w_i$ and the $3 \times 1$ column vector $B_i$ holding the bivector's components. The $3\times 3$ matrix $\left[ s_{ij} \right]_\times$ is representing the skew-symmetric cross-product matrix as usually defined for vectors in $\mathbb R^3$.
+where $d_{ij}$ and $s_{ij}$ are $3 \times 1$ column vectors holding pure quaternion coefficients, $M_{ij}$ is a skew-symmetric $4\times 4$ real matrix, so that $M_{ij}^T = -M_{ij}$. The quaternion $R_i$ is represented as $4 \times 1$ column vector made of the scalar $w_i$ and the $3 \times 1$ column vector $B_i$ holding the pure quaternion components. The $3\times 3$ matrix $\left[ s_{ij} \right]_\times$ is representing the skew-symmetric cross-product matrix as usually defined for vectors in $\mathbb R^3$.
 
 We can express $\sum_j \|R_i q_{ij} - p_{ji} R_i\|^2$ as the quadratic form $R_i^T M_i R_i$ where $M_i = \sum_j^n { c_{ij} M_{ij}^T M_{ij}}$. Note that since $M_{ij}$ is skew-symmetric, the product $M_{ij}^T M_{ij}$ is symmetric and positive semi-definite.
 Consequently the matrix $M_i$ is also symmetric positive semi-definite. It follows that all eigenvalues of $M_i$ are real and $\lambda_i \geq 0$.
@@ -319,12 +285,10 @@ Consequently the matrix $M_i$ is also symmetric positive semi-definite. It follo
 	M_{ij}^T M_{ij} = 
 	\left[\begin{array}{cc}
 		\| d_{ij} \|^2       &         (s_{ij} \times d_{ij})^T \\
-		s_{ij} \times d_{ij}  &    d_{ij} d_{ij}^T - \left[ s_j \right]^2_\times \\
+		s_{ij} \times d_{ij}  &    d_{ij} d_{ij}^T - \left[ s_{ij} \right]^2_\times \\
 	\end{array}\right]\\
 	d_{ij} = q_{ij} - p_{ij} \ \ s_{ij} = p_{ij} + q_{ij}  \nonumber
 \end{eqnarray}
-
-By the spectral theorem the minimizer of $R_i^T M_i R_i$ subject to $R_i^T R_i = 1$ is the eigenvector of $M_i$ associated with the smallest eigenvalue which is a positive number. This fact can be used to robustly solve the best alignment of vectors a.k.a. the Wahba problem.
 
 
  \subsection{Efficient Computation of $M_i$}
