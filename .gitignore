@@ -30,3 +30,10 @@
 *.exe
 *.out
 *.app
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Rust
+rust/target/

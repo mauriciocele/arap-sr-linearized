@@ -1,0 +1,11 @@
+[package]
+name = "arap"
+version = "0.1.0"
+edition = "2024"
+default-run = "arap"
+
+[dependencies]
+faer = "0.24"
+nalgebra = "0.35.0"
+png = "0.17"
+three-d = { version = "0.19", features = ["egui-gui"] }

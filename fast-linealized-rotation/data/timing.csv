@@ -1,0 +1,3 @@
+scene,control_vertices,detail_vertices,local_closed_ms,local_pcg_ms,pcg_iterations,local_relax3_ms,global_ms,transfer_ms,detail_ms,frame_ms
+cactus,502,5261,1.587,1.099,15.0,0.072,0.076,0.506,0.256,4.900
+armadillo,502,172974,0.470,0.793,21.0,0.076,0.070,14.844,12.760,29.093

@@ -3,7 +3,7 @@
         {
             "name": "Mac",
             "includePath": [
-                "/Users/maurlope/workplace/eigen-eigen-323c052e1731/**",
+                "/Users/maurlope/workplace/github/eigen-3.4.0/**",
                 "${workspaceFolder}/**"
             ],
             "defines": [],

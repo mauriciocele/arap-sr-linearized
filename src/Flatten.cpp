@@ -61,6 +61,8 @@ s.t R = R_const,  at the constrained points.
 #include "Laplacian.h"
 
 #include <memory>
+#include <chrono>
+#include <cstring>
 
 #include <vector>
 #include <queue>
@@ -244,6 +246,99 @@ IndexBuffer trianglesHi;
 std::vector<Handle> handles;
 std::set<int> allconstraints;
 
+/*
+Constrained Poisson solve: L x = b with x_c prescribed at the constrained vertices.
+
+PreFactor replaces each constrained row of L by an identity row, which makes the matrix non-symmetric and needs a
+sparse LU. Moving the prescribed values to the right-hand side instead leaves the free block:
+
+  L_ff x_f + L_fc x_c = b_f   =>   (-L_ff) x_f = -b_f + L_fc x_c
+
+With cotangent weights (symmetric, clamped to >= 0, rows not rescaled) -L_ff is symmetric and diagonally dominant,
+and positive definite as long as every connected component has a constrained vertex, so it is factored with a sparse
+Cholesky (LDL^T). The solution is the same as the LU of the row-replaced matrix.
+*/
+class PoissonSolver
+{
+public:
+	void factor(std::shared_ptr<SparseMatrix> L, const std::set<int>& constrained)
+	{
+		const int n = L->numRows();
+		freeIndex.assign(n, -1);
+		freeVertices.clear();
+		coupling.clear();
+		for (int i = 0; i < n; ++i) {
+			if (constrained.find(i) == constrained.end()) {
+				freeIndex[i] = (int)freeVertices.size();
+				freeVertices.push_back(i);
+			}
+		}
+		std::vector<Eigen::Triplet<double>> entries;
+		for (int r = 0; r < (int)freeVertices.size(); ++r) {
+			for (SparseMatrix::RowIterator it = L->iterator(freeVertices[r]); !it.end(); ++it) {
+				const int j = it.columnIndex();
+				if (freeIndex[j] >= 0)
+					entries.emplace_back(r, freeIndex[j], -it.value()); // -L_ff, diagonal included
+				else
+					coupling.emplace_back(r, j, it.value()); // L_fc
+			}
+		}
+		Eigen::SparseMatrix<double> M((int)freeVertices.size(), (int)freeVertices.size());
+		M.setFromTriplets(entries.begin(), entries.end());
+		ldlt.compute(M);
+		if (ldlt.info() != Eigen::Success) {
+			std::cerr << "PoissonSolver: the free Laplacian block is not positive definite" << std::endl;
+		}
+	}
+
+	// b holds the right-hand side in free rows and the prescribed values in constrained rows.
+	Eigen::MatrixXd solve(const Eigen::MatrixXd& b) const
+	{
+		Eigen::MatrixXd rhs((int)freeVertices.size(), b.cols());
+		for (int r = 0; r < (int)freeVertices.size(); ++r)
+			rhs.row(r) = -b.row(freeVertices[r]);
+		for (const Coupling& c : coupling)
+			rhs.row(c.row) += c.weight * b.row(c.vertex);
+		const Eigen::MatrixXd xf = ldlt.solve(rhs);
+		Eigen::MatrixXd x = b;
+		for (int r = 0; r < (int)freeVertices.size(); ++r)
+			x.row(freeVertices[r]) = xf.row(r);
+		return x;
+	}
+
+private:
+	struct Coupling
+	{
+		int row;
+		int vertex;
+		double weight;
+		Coupling(int row, int vertex, double weight) : row(row), vertex(vertex), weight(weight) {}
+	};
+	std::vector<int> freeIndex; // vertex -> reduced index, -1 when constrained
+	std::vector<int> freeVertices;
+	std::vector<Coupling> coupling;
+	Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt;
+};
+
+// --lu (or a non-cotangent Laplacian) keeps the original row-replaced LU solves.
+bool g_useLU = false;
+// --direct refactors the rotation system with a sparse Cholesky every local step instead of solving it with PCG.
+bool g_useDirect = false;
+// PCG preconditioner of the rotation system: a Cholesky factorization of its position-independent part, which
+// depends only on the mesh and the constraints, so it is computed once.
+Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> rotationPreconditioner;
+bool g_preconditionerReady = false;
+int g_lastPcgIterations = 0;
+const double PCG_TOLERANCE = 1e-12;
+const int PCG_MAX_ITERATIONS = 500;
+PoissonSolver poissonLow, poissonHi;
+Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>, Eigen::Lower> ldltRotations;
+bool g_rotationsAnalyzed = false;
+std::vector<int> rotationFreeIndex; // control vertex -> reduced block index, -1 when constrained
+int rotationFreeCount = 0;
+int g_maxDegreeLow = 0;
+const int MAX_ROTATION_DEGREE = 32;
+
 Eigen::Affine3d MotorToMatrix(const TRversor& R) {
 	TRversor Ri = inverse(R);
 
@@ -359,8 +454,19 @@ void meshMapping(Mesh *meshLow, Mesh *mesh, map<int, int>& mapping)
 	}
 }
 
+void RunSolverCheck();
+
 int main(int argc, char* argv[])
 {
+	bool check = false;
+	for (int i = 1; i < argc; ++i) {
+		if (strcmp(argv[i], "--lu") == 0) g_useLU = true;
+		if (strcmp(argv[i], "--direct") == 0) g_useDirect = true;
+		if (strcmp(argv[i], "--check") == 0) check = true;
+	}
+	// The Cholesky solves rely on the symmetric cotangent Laplacian (see PoissonSolver).
+	if (systemType != LaplaceBeltrami) g_useLU = true;
+
 	mesh.readOBJ("cactus2.obj"); //cactus2.obj  armadillo.obj
 	mesh.CenterAndNormalize();
 	mesh.computeNormals();
@@ -370,25 +476,6 @@ int main(int argc, char* argv[])
 	meshLow.computeNormals();
 
 	meshMapping(&meshLow, &mesh, mapping);
-
-	// GLUT Window Initialization:
-	glutInit (&argc, argv);
-	glutInitWindowSize(g_viewportWidth, g_viewportHeight);
-	glutInitDisplayMode( GLUT_RGB | GLUT_ALPHA | GLUT_DOUBLE | GLUT_DEPTH);
-	glutCreateWindow(WINDOW_TITLE);
-
-	// Register callbacks:
-	glutDisplayFunc(display);
-	glutReshapeFunc(reshape);
-	glutMouseFunc(MouseButton);
-	glutMotionFunc(MouseMotion);
-	glutKeyboardUpFunc(KeyboardUpFunc);
-	glutSpecialFunc(SpecialFunc);
-	glutSpecialUpFunc(SpecialUpFunc);
-	glutIdleFunc(Idle);
-	atexit(DestroyWindow);
-
-	InitializeDrawing();
 
 	//cactus.obj
 	handles.push_back(Handle(_dualSphere(c3gaPoint(.0, .04, 0.7) - 0.5*SQR(0.15)*ni)));
@@ -437,7 +524,15 @@ int main(int argc, char* argv[])
 	for (Handle& handle : handles) {
 		allconstraints.insert(handle.constraints.begin(), handle.constraints.end());
 	}
-	PreFactor(A, allconstraints, solverLow);
+	if (g_useLU || check) PreFactor(A, allconstraints, solverLow);
+	if (!g_useLU || check) poissonLow.factor(A, allconstraints);
+
+	rotationFreeIndex.assign(meshLow.numVertices(), -1);
+	rotationFreeCount = 0;
+	for (Vertex& vertexLow : meshLow.getVertices()) {
+		g_maxDegreeLow = std::max(g_maxDegreeLow, vertexLow.getValence());
+		if (!is_constrained(allconstraints, vertexLow.ID)) rotationFreeIndex[vertexLow.ID] = rotationFreeCount++;
+	}
 
 	g_meshArea = meshArea(&meshLow);
 
@@ -464,7 +559,8 @@ int main(int argc, char* argv[])
 		constraintsHi.insert(iter->second);
 	}
 	b3Hi = Eigen::MatrixXd(AHi->numRows(), 3);
-	PreFactor(AHi, constraintsHi, solverHi);
+	if (g_useLU || check) PreFactor(AHi, constraintsHi, solverHi);
+	if (!g_useLU || check) poissonHi.factor(AHi, constraintsHi);
 
   RotationMatrix = Eigen::SparseMatrix<double>(A->numRows()*4, A->numColumns()*4);
   triplets.resize(A->NonZeros()*16);
@@ -472,6 +568,30 @@ int main(int argc, char* argv[])
   Rknown.setZero();
   RknownHi = Eigen::MatrixXd(AHi->numRows(), 4);
   RknownHi.setZero();
+
+	if (check) {
+		RunSolverCheck();
+		return 0;
+	}
+
+	// GLUT Window Initialization:
+	glutInit (&argc, argv);
+	glutInitWindowSize(g_viewportWidth, g_viewportHeight);
+	glutInitDisplayMode( GLUT_RGB | GLUT_ALPHA | GLUT_DOUBLE | GLUT_DEPTH);
+	glutCreateWindow(WINDOW_TITLE);
+
+	// Register callbacks:
+	glutDisplayFunc(display);
+	glutReshapeFunc(reshape);
+	glutMouseFunc(MouseButton);
+	glutMotionFunc(MouseMotion);
+	glutKeyboardUpFunc(KeyboardUpFunc);
+	glutSpecialFunc(SpecialFunc);
+	glutSpecialUpFunc(SpecialUpFunc);
+	glutIdleFunc(Idle);
+	atexit(DestroyWindow);
+
+	InitializeDrawing();
 
 	glutMainLoop();
 
@@ -493,7 +613,7 @@ void SolvePoissonEquation(VertexBuffer& vertexDescriptors)
 		}
 	}
 
-	xyzLow = solverLow.solve(b3Low);
+	xyzLow = g_useLU ? Eigen::MatrixXd(solverLow.solve(b3Low)) : poissonLow.solve(b3Low);
 
 	for( int i = 0 ; i < n ; ++i ) {
 		vertexDescriptors.deformedPositions[i] = xyzLow.row(i);
@@ -512,7 +632,7 @@ void SolvePoissonEquationHi(VertexBuffer& vertexDescriptors, VertexBuffer& verte
 		b3Hi.row(pair.second) = vertexDescriptorsLow.deformedPositions[pair.first];
 	}
 
-	xyzHi = solverHi.solve(b3Hi);
+	xyzHi = g_useLU ? Eigen::MatrixXd(solverHi.solve(b3Hi)) : poissonHi.solve(b3Hi);
 
 	for (int i = 0; i < n; ++i) {
 		vertexDescriptors.deformedPositions[i] = xyzHi.row(i);
@@ -539,7 +659,7 @@ void LaplacianRotationsInterpolation(VertexBuffer& vertexDescriptors, VertexBuff
 		RknownHi.row(pair.second) = vertexDescriptorsLow.rotors[pair.first].coeffs();
 	}
 
-	RbestHi = solverHi.solve(RknownHi);
+	RbestHi = g_useLU ? Eigen::MatrixXd(solverHi.solve(RknownHi)) : poissonHi.solve(RknownHi);
 
 	for (int i = 0; i < n; ++i) {
 		vertexDescriptors.rotors[i] = Eigen::Quaterniond((Eigen::Vector4d)RbestHi.row(i)).normalized();
@@ -721,7 +841,8 @@ Eigen::Quaterniond E3GA_Fast4(const vector<Eigen::Vector3d>& P, const vector<Eig
   return Eigen::Quaterniond(x(0), x(1), x(2), x(3)).normalized();
 }
 
-void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, std::set<int>& constraints, bool analyzeSystem)
+// The rotation system as originally built: identity rows at the constrained vertices, solved with a sparse LU.
+void SolveRotationsSystemLU(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, std::set<int>& constraints, bool analyzeSystem)
 {
 	vector<Eigen::Vector3d> P;
 	vector<Eigen::Vector3d> Q;
@@ -849,6 +970,202 @@ void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuf
 			vertexDescriptors.laplacianCoordinates[i] += 0.5 * wij * (Ri._transformVector(V) + Rj._transformVector(V));;
 		}
 	}
+}
+
+/*
+Preconditioned conjugate gradients for the rotation system K x = b (lower triangle of K in M), warm-started from
+the previous rotations.
+
+K = C (x) I_4 + S M_blocks, where the block-diagonal S M_blocks (the membrane terms, which change with the positions)
+is positive semi-definite and C, the diagonal s_i (alpha A + eps) minus the adjacency of the free cells, depends only
+on the mesh and the constraints. C is therefore factored once and used as the preconditioner, applied to the four
+quaternion components at once. The preconditioned system has condition number at most
+1 + max_i s_i lambda_max(M_i) / e, which tends to 1 as the mesh is refined, so a local step costs a handful of
+back-substitutions.
+*/
+Eigen::VectorXd SolveRotationsPCG(const Eigen::SparseMatrix<double>& M, const Eigen::VectorXd& b,
+                                  const Eigen::VectorXd& x0, const std::vector<Eigen::Triplet<double>>& constantEntries,
+                                  int cells)
+{
+	typedef Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> Components;
+	if (!g_preconditionerReady) {
+		Eigen::SparseMatrix<double> C(cells, cells);
+		C.setFromTriplets(constantEntries.begin(), constantEntries.end());
+		rotationPreconditioner.compute(C);
+		g_preconditionerReady = true;
+	}
+	// x[4 r + k] is component k of cell r, so a row-major (cells x 4) view puts each component in a column.
+	auto precondition = [&](const Eigen::VectorXd& r) {
+		Eigen::MatrixXd z = rotationPreconditioner.solve(Eigen::Map<const Components>(r.data(), cells, 4));
+		Eigen::VectorXd out(r.size());
+		Eigen::Map<Components>(out.data(), cells, 4) = z;
+		return out;
+	};
+	auto K = M.selfadjointView<Eigen::Lower>();
+	Eigen::VectorXd x = x0;
+	Eigen::VectorXd r = b - K * x;
+	Eigen::VectorXd z = precondition(r);
+	Eigen::VectorXd p = z;
+	double rz = r.dot(z);
+	const double threshold = PCG_TOLERANCE * b.norm();
+	int k = 0;
+	while (k < PCG_MAX_ITERATIONS && r.norm() > threshold && rz != 0.0) {
+		Eigen::VectorXd q = K * p;
+		const double alpha = rz / p.dot(q);
+		x += alpha * p;
+		r -= alpha * q;
+		z = precondition(r);
+		const double rzNext = r.dot(z);
+		p = z + (rzNext / rz) * p;
+		rz = rzNext;
+		++k;
+	}
+	g_lastPcgIterations = k;
+	return x;
+}
+
+/*
+The same rotation system, made symmetric and solved with a sparse Cholesky.
+
+The row block of a free vertex i with degree d_i is
+
+  (H_i + (alphaA + eps) I) R_i - c_i sum_j R_j = c_i ei R_i^prev,    c_i = alphaA / (d_i + ei)
+
+so block (i, j) is -c_i I while block (j, i) is -c_j I. Scaling the row block by 1 / c_i = (d_i + ei) / alphaA gives
+
+  s_i (H_i + (alphaA + eps) I) R_i - sum_j R_j = ei R_i^prev,       s_i = (d_i + ei) / alphaA
+
+whose off-diagonal blocks are -I both ways. The constrained rotations are known (the E3GA_Fast4 fit of the identity
+rows), so they move to the right-hand side (+R_j for each constrained neighbour). H_i is positive semi-definite, so
+the diagonal block has eigenvalues >= (d_i + ei)(1 + eps / alphaA) > d_i, which makes the free block strictly
+diagonally dominant and positive definite. Same solution as SolveRotationsSystemLU.
+
+Symmetry needs j in the ring of i exactly when i is in the ring of j, so this is used only when no ring is truncated
+at MAX_ROTATION_DEGREE.
+*/
+void SolveRotationsSystemLDLT(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, std::set<int>& constraints, bool analyzeSystem)
+{
+	vector<Eigen::Vector3d> P(MAX_ROTATION_DEGREE);
+	vector<Eigen::Vector3d> Q(MAX_ROTATION_DEGREE);
+	vector<double> w(MAX_ROTATION_DEGREE);
+	vector<int> neighbors(MAX_ROTATION_DEGREE);
+	vector<Eigen::Quaterniond> Rq(MAX_ROTATION_DEGREE);
+	Eigen::Matrix4d JtJ;
+	const double alpha = 0.14;
+	const double ei = 0.2;
+	const double alphaA = alpha * g_meshArea;
+	const int n = vertexDescriptors.get_size();
+
+	auto gather = [&](Vertex& vertex) {
+		const int i = vertex.ID;
+		const Eigen::Vector3d& pi = vertex.p;
+		const Eigen::Vector3d& tpi = vertexDescriptors.deformedPositions[i];
+		int degree = 0;
+		for (Vertex::EdgeAroundIterator around = vertex.iterator(); !around.end(); around++, degree++) {
+			const int j = around.edge_out()->pair->vertex->ID;
+			P[degree] = mesh->vertexAt(j).p - pi;
+			Q[degree] = vertexDescriptors.deformedPositions[j] - tpi;
+			neighbors[degree] = j;
+			w[degree] = (*A)(i, j);
+		}
+		return degree;
+	};
+	auto coefficients = [](const Eigen::Quaterniond& q) { return Eigen::Vector4d(q.w(), q.x(), q.y(), q.z()); };
+
+	// Constrained vertices: the closed-form fit their identity rows would have returned.
+	std::vector<Eigen::Vector4d> fixed(n, Eigen::Vector4d::Zero());
+	for (Vertex& vertex : mesh->getVertices()) {
+		if (!is_constrained(constraints, vertex.ID)) continue;
+		const int degree = gather(vertex);
+		for (int v = 0; v < degree; ++v) Rq[v] = vertexDescriptors.rotors[neighbors[v]];
+		fixed[vertex.ID] = coefficients(E3GA_Fast4(P, Q, w, alphaA, Rq, degree));
+	}
+
+	// Free vertices: scaled diagonal block, -I towards free neighbours (lower triangle only), constrained
+	// neighbours on the right-hand side.
+	const int m = 4 * rotationFreeCount;
+	std::vector<Eigen::Triplet<double>> entries;
+	entries.reserve(m * 12);
+	Eigen::VectorXd rhs = Eigen::VectorXd::Zero(m);
+	Eigen::VectorXd previous = Eigen::VectorXd::Zero(m);
+	// The position-independent part C of the system, one scalar row per free cell (lower triangle): the PCG
+	// preconditioner.
+	std::vector<Eigen::Triplet<double>> constantEntries;
+	for (Vertex& vertex : mesh->getVertices()) {
+		const int i = vertex.ID;
+		const int r = rotationFreeIndex[i];
+		if (r < 0) continue;
+		const int rr = 4 * r;
+		const int degree = gather(vertex);
+		const double scale = ((double)degree + ei) / alphaA;
+		E3GA_Prep(P, Q, w, degree, JtJ);
+		for (int k = 0; k < 4; ++k) JtJ(k, k) += alphaA + 1e-6;
+		for (int a = 0; a < 4; ++a)
+			for (int b = 0; b <= a; ++b)
+				entries.emplace_back(rr + a, rr + b, scale * JtJ(a, b));
+		constantEntries.emplace_back(r, r, scale * (alphaA + 1e-6));
+		previous.segment<4>(rr) = coefficients(vertexDescriptors.rotors[i]);
+		Eigen::Vector4d b = ei * coefficients(vertexDescriptors.rotors[i]);
+		for (int v = 0; v < degree; ++v) {
+			const int c = rotationFreeIndex[neighbors[v]];
+			if (c < 0) {
+				b += fixed[neighbors[v]];
+			} else if (c < r) {
+				for (int k = 0; k < 4; ++k) entries.emplace_back(rr + k, 4 * c + k, -1.0);
+				constantEntries.emplace_back(r, c, -1.0);
+			}
+		}
+		rhs.segment<4>(rr) = b;
+	}
+
+	Eigen::VectorXd solution;
+	if (m > 0) {
+		Eigen::SparseMatrix<double> M(m, m);
+		M.setFromTriplets(entries.begin(), entries.end());
+		if (g_useDirect) {
+			// The pattern only depends on the mesh and the constraints, so the ordering is computed once.
+			if (analyzeSystem || !g_rotationsAnalyzed) {
+				ldltRotations.analyzePattern(M);
+				g_rotationsAnalyzed = true;
+			}
+			ldltRotations.factorize(M);
+			if (ldltRotations.info() != Eigen::Success) {
+				std::cerr << "SolveRotationsSystemLDLT: the rotation system is not positive definite" << std::endl;
+			}
+			solution = ldltRotations.solve(rhs);
+		} else {
+			solution = SolveRotationsPCG(M, rhs, previous, constantEntries, rotationFreeCount);
+		}
+	}
+
+	for (int i = 0; i < n; ++i) {
+		const int r = rotationFreeIndex[i];
+		const Eigen::Vector4d c = r < 0 ? fixed[i] : Eigen::Vector4d(solution.segment<4>(4 * r));
+		vertexDescriptors.rotors[i] = Eigen::Quaterniond(c(0), c(1), c(2), c(3)).normalized();
+	}
+
+	std::fill(vertexDescriptors.laplacianCoordinates.begin(), vertexDescriptors.laplacianCoordinates.end(), Eigen::Vector3d(0, 0, 0));
+	for (Vertex& vertex : mesh->getVertices())
+	{
+		int i = vertex.ID;
+		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); !edgeAroundIter.end(); edgeAroundIter++)
+		{
+			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
+			double wij = (*A)(i, j);
+			Eigen::Quaterniond& Ri = vertexDescriptors.rotors[i];
+			Eigen::Quaterniond& Rj = vertexDescriptors.rotors[j];
+			Eigen::Vector3d V = mesh->vertexAt(j).p - mesh->vertexAt(i).p;
+			vertexDescriptors.laplacianCoordinates[i] += 0.5 * wij * (Ri._transformVector(V) + Rj._transformVector(V));
+		}
+	}
+}
+
+void SolveRotationsSystem(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, std::set<int>& constraints, bool analyzeSystem)
+{
+	if (g_useLU || g_maxDegreeLow > MAX_ROTATION_DEGREE)
+		SolveRotationsSystemLU(mesh, A, vertexDescriptors, constraints, analyzeSystem);
+	else
+		SolveRotationsSystemLDLT(mesh, A, vertexDescriptors, constraints, analyzeSystem);
 }
 
 void transferRotations(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
@@ -1360,3 +1677,68 @@ void DestroyWindow()
 	ReleaseDrawing();
 }
 
+
+/*
+--check: runs the same interactive frames with the original LU solves, with the Cholesky solves refactored every
+local step (--direct), and with the PCG local step (the default), from the same start state, after the
+displacement the 'C' key applies. Reports how far apart the results are and how long a frame takes with each.
+*/
+void RunSolverCheck()
+{
+	vectorE3GA motion = _vectorE3GA(-70.0, -60.0, 0);
+	normalizedTranslator T1 = _normalizedTranslator(inverse(g_modelRotor) * exp(_freeVector(-g_camera.translateVel*motion*ni)) * g_modelRotor);
+	handles[0].T = normalize(_TRversor(T1 * handles[0].T));
+
+	const int frames = 10;
+	const VertexBuffer low0 = vertexDescriptorsLow;
+	const VertexBuffer high0 = vertexDescriptors;
+
+	// mode 0: LU (original), 1: Cholesky refactored per step, 2: PCG with the factor-once preconditioner.
+	int pcgIterations = 0;
+	auto run = [&](int mode) {
+		g_useLU = mode == 0;
+		g_useDirect = mode == 1;
+		vertexDescriptorsLow = low0;
+		vertexDescriptors = high0;
+		SolvePoissonEquation(vertexDescriptorsLow);
+		const auto start = std::chrono::steady_clock::now();
+		for (int frame = 0; frame < frames; ++frame) {
+			for (int i = 0; i < 3; ++i) {
+				SolveRotationsSystem(&meshLow, A, vertexDescriptorsLow, allconstraints, frame == 0 && i == 0);
+				SolvePoissonEquation(vertexDescriptorsLow);
+				if (mode == 2) pcgIterations += g_lastPcgIterations;
+			}
+			transferRotations(&mesh, AHi, vertexDescriptors, vertexDescriptorsLow);
+			SolvePoissonEquationHi(vertexDescriptors, vertexDescriptorsLow);
+		}
+		const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
+		return elapsed.count() / frames;
+	};
+
+	const double luMs = run(0);
+	const VertexBuffer lowLU = vertexDescriptorsLow;
+	const VertexBuffer highLU = vertexDescriptors;
+	auto gaps = [&](double& rotationGap, double& lowGap, double& highGap) {
+		rotationGap = lowGap = highGap = 0.0;
+		for (int i = 0; i < vertexDescriptorsLow.get_size(); ++i) {
+			rotationGap = std::max(rotationGap, vertexDescriptorsLow.rotors[i].angularDistance(lowLU.rotors[i]));
+			lowGap = std::max(lowGap, (vertexDescriptorsLow.deformedPositions[i] - lowLU.deformedPositions[i]).norm());
+		}
+		for (int i = 0; i < vertexDescriptors.get_size(); ++i) {
+			highGap = std::max(highGap, (vertexDescriptors.deformedPositions[i] - highLU.deformedPositions[i]).norm());
+		}
+	};
+	double rd, ld, hd, rp, lp, hp;
+	const double directMs = run(1);
+	gaps(rd, ld, hd);
+	const double pcgMs = run(2);
+	gaps(rp, lp, hp);
+
+	std::cout << "max degree of the control mesh: " << g_maxDegreeLow
+	          << (g_maxDegreeLow > MAX_ROTATION_DEGREE ? " (rotation system falls back to LU)" : "") << std::endl;
+	std::cout << "frame time: LU " << luMs << " ms, Cholesky per step " << directMs << " ms, PCG " << pcgMs
+	          << " ms (" << (double)pcgIterations / (3 * frames) << " PCG iterations per local step)" << std::endl;
+	std::cout << "largest difference to LU after " << frames << " frames:" << std::endl;
+	std::cout << "  Cholesky: rotations " << rd << " rad, control positions " << ld << ", detailed positions " << hd << std::endl;
+	std::cout << "  PCG:      rotations " << rp << " rad, control positions " << lp << ", detailed positions " << hp << std::endl;
+}
