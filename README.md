@@ -1,3 +1,11 @@
+
+
+https://github.com/user-attachments/assets/8554cce2-da43-4a4d-bb8b-ac0a03171eca
+
+
+https://github.com/user-attachments/assets/72411075-c515-4042-8b84-52540b6bad52
+
+
 # arap-sr-linearized
 Exact Smooth-Rotation Estimation in Near-Linear Time for ARAP Surface Deformation.
 
