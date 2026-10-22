@@ -139,8 +139,8 @@ Let $Q$ be the rest mesh, with vertices $q_1, \dots, q_m$, and $P$ the deformed 
 E(P, R) = \sum_{i=1}^m \Big( \sum_{j \in N(i)} c_{ij} \, \| R_i \, q_{ij} \, \tilde R_i - p_{ij} \|^2
 + \alpha A \sum_{j \in N(i)} w_{ij} \, \| R_j - R_i \|^2 \Big),
 \end{equation}
-where $R_1, \dots, R_m \in \mathbb{H}$ are unit quaternions, $\tilde R_i$ is the conjugate of $R_i$, and edge vectors are identified with pure quaternions.
-The membrane weights $c_{ij} = \max\big(0, \tfrac{1}{2}(\cot \alpha_{ij} + \cot \beta_{ij})\big)$ are the familiar cotangent weights, where $\alpha_{ij}$ and $\beta_{ij}$ are the angles opposite the edge $ij$. They are symmetric, $c_{ij} = c_{ji}$, and non-negative, but not normalized.
+where $R_1, \dots, R_m \in \mathbb{H}$ are unit quaternions, $\tilde R_i$ is the conjugate of $R_i$, and edge vectors are identified with pure quaternions, so that $R_i \, q_{ij} \, \tilde R_i$ is the rest edge $q_{ij}$ rotated by $R_i$.
+The membrane weights $c_{ij} = \max\big(0, \tfrac{1}{2}(\cot \gamma_{ij} + \cot \delta_{ij})\big)$ are the familiar cotangent weights, where $\gamma_{ij}$ and $\delta_{ij}$ are the angles opposite the edge $ij$. They are symmetric, $c_{ij} = c_{ji}$, and non-negative, but not normalized.
 The bending weights $w_{ij}$ are positive and normalized per vertex, $\sum_{j \in N(i)} w_{ij} = 1$; in this paper $w_{ij} = 1/d_i$. Since $d_i$ varies from vertex to vertex, they are \emph{not} symmetric in general: $w_{ij} \neq w_{ji}$.
 $A$ is the mesh area, which makes the energy scale invariant, and $\alpha$ is a positive scalar parameter.
 
@@ -151,7 +151,9 @@ The bending term keeps the variation of the rotations within a cell's neighborho
 
 The vertices of $Q$ are in their original positions, the vertices of $P$ are the deformed positions, and the quaternion $R_i$ is the best rigid transformation, in the least-squares sense, relating the original and the deformed cell.
 This is a non-linear optimization problem, typically solved by an iterative local/global method that solves two linear sub-problems in each iteration.
-The first, the \emph{local step}, keeps the vertices of $P$ constant and finds the best rotation $R_i$ for each cell. The second, the \emph{global step}, keeps the rotations $R_i$ constant and computes the optimal deformed vertices $p_i$ in the least-squares sense.
+The first, the \emph{local step}, keeps the vertices of $P$ constant and finds the best rotation $R_i$ for each cell. The second, the \emph{global step}, keeps the rotations $R_i$ constant and computes the optimal deformed vertices $p_i$ in the least-squares sense. Each step can only lower the energy, so the iterations decrease it monotonically.
+
+Both steps will be treated with the same four moves, which we spell out once because they recur throughout the paper: (1)~write the energy as a function of the unknowns of the step only; (2)~set its gradient to zero, which gives a linear system; (3)~substitute the values that are fixed by the user's constraints, which leaves a square system in the free unknowns; and (4)~show that this system is symmetric positive definite, so that it has a unique solution and can be solved with a Cholesky factorization or by conjugate gradients. Section~\ref{section:global_step} applies them to the positions, where they are classical. Section~\ref{section:local_step} applies them to the rotations, where the second and fourth moves need more care, and then shows how the resulting system is solved in near-linear time.
 
 \section{Global Step}
 \label{section:global_step}
@@ -160,24 +162,34 @@ The global step computes the optimal vertices $p_1, \dots, p_m$ for fixed rotati
 \begin{equation*}
 \min_{p_1, \dots, p_m \in \mathbb R^3} \; \sum_{i=1}^m \sum_{j \in N(i)} c_{ij} \, \| R_i \, q_{ij} \, \tilde R_i - p_{ij} \|^2 .
 \end{equation*}
-The bending term of (\ref{eq:sr_arap}) does not depend on the positions, so it is omitted. Vertex $p_i$ appears in the edges $p_{ij}$ of its own cell and in the edges $p_{ji} = -p_{ij}$ of its neighbors' cells. Since $c_{ij} = c_{ji}$ and $q_{ji} = -q_{ij}$, setting the partial derivative with respect to $p_i$ to zero gives the linear system of Equation~(\ref{eq:ls_for_p_ga}) \cite{Lopez2013}:
+The bending term of (\ref{eq:sr_arap}) does not depend on the positions, so it is omitted. To shorten the notation, write $t^i_{ij} = R_i \, q_{ij} \, \tilde R_i$ for the rest edge $q_{ij}$ rotated by the rotation of cell $i$; it is a known vector in this step.
+
+\paragraph{Where $p_i$ appears.} A vertex $p_i$ enters the energy in two kinds of terms: in its own cell, through every edge $p_{ij} = p_j - p_i$ with $j \in N(i)$, and in the cell of each neighbor $j$, through the edge $p_{ji} = p_i - p_j$. Differentiating one term of each kind,
+\begin{align*}
+\frac{\partial}{\partial p_i} \| t^i_{ij} - (p_j - p_i) \|^2 &= 2 \, \big( t^i_{ij} - p_{ij} \big),
+\\
+\frac{\partial}{\partial p_i} \| t^j_{ji} - (p_i - p_j) \|^2 &= -2 \, \big( t^j_{ji} - p_{ji} \big) = 2 \, \big( t^j_{ij} - p_{ij} \big),
+\end{align*}
+where the last equality uses $q_{ji} = -q_{ij}$, hence $t^j_{ji} = -t^j_{ij}$, and $p_{ji} = -p_{ij}$. Both kinds of terms carry the same weight, since $c_{ij} = c_{ji}$.
+
+\paragraph{Stationarity.} Summing over the neighbors and setting the gradient to zero gives $\sum_{j} c_{ij} \, ( t^i_{ij} + t^j_{ij} - 2 \, p_{ij} ) = 0$, that is, the linear system \cite{Lopez2013}
 \begin{equation}
 \label{eq:ls_for_p_ga}
-\sum_{j \in N(i)} c_{ij} \, (p_j - p_i) = \sum_{j \in N(i)} \frac{c_{ij}}{2} \, \big( R_i \, q_{ij} \, \tilde R_i + R_j \, q_{ij} \, \tilde R_j \big),
+\sum_{j \in N(i)} c_{ij} \, (p_j - p_i) = \sum_{j \in N(i)} \frac{c_{ij}}{2} \, \big( R_i \, q_{ij} \, \tilde R_i + R_j \, q_{ij} \, \tilde R_j \big).
 \end{equation}
-which can be written in matrix form as $\mathrm L \, \mathrm P = \mathrm C$. Here $\mathrm L$ is the $m \times m$ discrete Laplace--Beltrami operator, $(\mathrm L \, \mathrm P)_i = \sum_{j \in N(i)} c_{ij} (p_j - p_i)$, $\mathrm P$ is the $m \times 3$ matrix of target positions, and $\mathrm C$ is the $m \times 3$ matrix whose $i$th row is the right-hand side of Equation~(\ref{eq:ls_for_p_ga}). The operator $\mathrm L$ is symmetric and negative semi-definite, since
+Each edge of the deformed mesh is asked to match the average of the rest edge rotated by the rotations of its two end cells. In matrix form the system reads $\mathrm L \, \mathrm P = \mathrm B$. Here $\mathrm L$ is the $m \times m$ discrete Laplace--Beltrami operator, $(\mathrm L \, \mathrm P)_i = \sum_{j \in N(i)} c_{ij} (p_j - p_i)$, $\mathrm P$ is the $m \times 3$ matrix of target positions, and $\mathrm B$ is the $m \times 3$ matrix whose $i$th row is the right-hand side of Equation~(\ref{eq:ls_for_p_ga}). The operator $\mathrm L$ is symmetric and negative semi-definite, since
 \begin{equation*}
 -x^T \mathrm L \, x = \sum_{\{i,j\} \in \mathcal E} c_{ij} \, (x_i - x_j)^2 \geq 0 \quad \text{for all } x \in \mathbb R^m,
 \end{equation*}
 where $\mathcal E$ is the set of mesh edges, each counted once.
 
 \subsection{Positional constraints}
-Constraints of the form $p_i = p^{const}_i$ for $i$ in a set $\mathcal C$ of constrained vertices are incorporated by substituting the corresponding variables. Let $\mathcal F$ be the remaining (free) vertices. Partitioning $\mathrm L$, $\mathrm P$ and $\mathrm C$ accordingly, the rows of $\mathcal F$ read $\mathrm L_{\mathcal F \mathcal F} \mathrm P_{\mathcal F} + \mathrm L_{\mathcal F \mathcal C} \mathrm P_{\mathcal C} = \mathrm C_{\mathcal F}$, that is,
+Constraints of the form $p_i = p^{const}_i$ for $i$ in a set $\mathcal C$ of constrained vertices are incorporated by substituting the corresponding variables. Let $\mathcal F$ be the remaining (free) vertices. The equations of the constrained vertices are dropped, since their positions are not unknowns any more. Partitioning $\mathrm L$, $\mathrm P$ and $\mathrm B$ accordingly, the rows of $\mathcal F$ read $\mathrm L_{\mathcal F \mathcal F} \mathrm P_{\mathcal F} + \mathrm L_{\mathcal F \mathcal C} \mathrm P_{\mathcal C} = \mathrm B_{\mathcal F}$. Moving the known part to the right and changing signs, so that the matrix is positive rather than negative,
 \begin{equation}
 \label{eq:global_reduced}
-(-\mathrm L_{\mathcal F \mathcal F}) \, \mathrm P_{\mathcal F} = -\mathrm C_{\mathcal F} + \mathrm L_{\mathcal F \mathcal C} \, \mathrm P^{const}_{\mathcal C}.
+(-\mathrm L_{\mathcal F \mathcal F}) \, \mathrm P_{\mathcal F} = -\mathrm B_{\mathcal F} + \mathrm L_{\mathcal F \mathcal C} \, \mathrm P^{const}_{\mathcal C}.
 \end{equation}
-This system is square, so no least-squares formulation (normal equations $\mathrm L^T \mathrm L$) is needed; forming the normal equations would square the condition number and increase the fill-in of the factorization.
+This system is square, with one equation per free unknown, so no least-squares formulation (normal equations $\mathrm L^T \mathrm L$) is needed; forming the normal equations would square the condition number and increase the fill-in of the factorization.
 
 \begin{prop}
 \label{prop:laplacian_spd}
@@ -187,119 +199,110 @@ If every connected component of the mesh, connected through edges with $c_{ij} >
 $-\mathrm L_{\mathcal F \mathcal F}$ is a principal submatrix of the symmetric matrix $-\mathrm L$, so it is symmetric. For $x \in \mathbb R^{|\mathcal F|}$, extend it by zero on $\mathcal C$; then $x^T (-\mathrm L_{\mathcal F \mathcal F}) x = \sum_{\{i,j\} \in \mathcal E} c_{ij} (x_i - x_j)^2 \geq 0$. Equality holds only if $x$ is constant on every component, and since every component contains a constrained vertex, where the extended $x$ is zero, this forces $x = 0$.
 \end{proof}
 
-Equation~(\ref{eq:global_reduced}) is therefore solved with a sparse Cholesky factorization of $-\mathrm L_{\mathcal F \mathcal F}$, which depends only on the mesh and the constraint set. It is computed once; every global step then costs two sparse triangular solves per coordinate. The three coordinates share the factorization.
+Equation~(\ref{eq:global_reduced}) is therefore solved with a sparse Cholesky factorization of $-\mathrm L_{\mathcal F \mathcal F}$. This matrix depends only on the rest mesh and the constraint set, not on the rotations, so it is factored once; every global step then costs two sparse triangular solves per coordinate, and the three coordinates share the factorization. The local step will not be this fortunate: its matrix changes with the positions, and Section~\ref{section:pcg} shows how to recover a factor-once method for it.
 
 \section{Local Step}
 \label{section:local_step}
 
-As described in the previous sections, the rotations of the cells are codependent over the whole mesh. The current approach optimizes them with a relaxation method: the rotation of each cell is computed independently while the neighboring rotations are kept fixed, and this is repeated until global convergence. At least two relaxation iterations must be performed in each global iteration. In this section we show how the local step can be solved in closed form, as a single sparse linear system, eliminating relaxation iterations entirely.
+In the local step the positions are fixed and the rotations are the unknowns. Unlike the positions, the rotations cannot be found one cell at a time: the bending term couples the rotation of every cell to those of its neighbors, and through them to the whole mesh. SR-ARAP handles this coupling by relaxation. It repeatedly visits the cells and finds the best rotation of each one with its neighbors' rotations held fixed, and since only two or three such sweeps can be afforded per iteration, the rotations it returns are approximate.
 
-\subsection{Linearized membrane energy}
+We follow the four moves of Section~\ref{section:sr_arap} instead. First we make the energy quadratic by treating quaternions as vectors of $\mathbb R^4$ (Section~\ref{section:linearization}). We then write the equation of a single cell, which is the equation relaxation solves (Section~\ref{section:one_cell}), and require it to hold at every cell at once, which gives one linear system for all the rotations (Section~\ref{section:all_cells}). After a scaling of its rows the system is symmetric, and we identify the energy it minimizes (Section~\ref{section:exact_energy}). Substituting the constrained rotations, we prove that it is positive definite (Section~\ref{section:rotation_constraints}), discuss the role of the feedback term (Section~\ref{section:feedback}), and finally show how it is solved in near-linear time (Section~\ref{section:pcg}).
 
-For a unit quaternion $R_i$, $\| R_i \, q_{ij} \, \tilde R_i - p_{ij} \| = \| R_i \, q_{ij} - p_{ij} \, R_i \|$, since right multiplication by the unit quaternion $R_i$ preserves the norm. The expression $R_i \, q_{ij} - p_{ij} \, R_i$ is linear in the four coefficients of $R_i$, $R_i \, q_{ij} - p_{ij} \, R_i = M_{ij} R_i$, so the membrane term of cell $i$ is the quadratic form
+\subsection{Rotations as vectors of $\mathbb R^4$}
+\label{section:linearization}
+
+Three observations turn the membrane term of a cell into a quadratic form in the coefficients of its quaternion.
+
+\emph{(i) The conjugate can be removed.} Multiplying a quaternion by a unit quaternion does not change its norm. Multiplying $R_i \, q_{ij} \, \tilde R_i - p_{ij}$ on the right by $R_i$ and using $\tilde R_i R_i = 1$,
+\begin{equation*}
+\| R_i \, q_{ij} \, \tilde R_i - p_{ij} \| = \| (R_i \, q_{ij} \, \tilde R_i - p_{ij}) \, R_i \| = \| R_i \, q_{ij} - p_{ij} \, R_i \| .
+\end{equation*}
+
+\emph{(ii) The result is linear in $R_i$.} Both $R_i \, q_{ij}$ and $p_{ij} \, R_i$ are linear in the four coefficients of $R_i$, so $R_i \, q_{ij} - p_{ij} \, R_i = M_{ij} R_i$ for a $4 \times 4$ real matrix $M_{ij}$ that depends only on $q_{ij}$ and $p_{ij}$. Section~\ref{section:the_form_of_arap_matrix} gives it explicitly.
+
+\emph{(iii) The membrane term is a quadratic form.} Since $\| M_{ij} R_i \|^2 = R_i^T M_{ij}^T M_{ij} R_i$, summing over the cell gives
 \begin{equation}
 \label{eq:membrane_quadratic}
-\sum_{j \in N(i)} c_{ij} \, \| R_i \, q_{ij} - p_{ij} \, R_i \|^2 = R_i^T M_i \, R_i, \qquad M_i = \sum_{j \in N(i)} c_{ij} \, M_{ij}^T M_{ij},
+\sum_{j \in N(i)} c_{ij} \, \| R_i \, q_{ij} - p_{ij} \, R_i \|^2 = R_i^T M_i \, R_i, \qquad M_i = \sum_{j \in N(i)} c_{ij} \, M_{ij}^T M_{ij}.
 \end{equation}
-where $M_i$ is a symmetric positive semi-definite $4 \times 4$ matrix built from $q_{ij}$ and $p_{ij}$ (see Section~\ref{section:the_form_of_arap_matrix}). In what follows quaternions are treated as vectors of $\mathbb R^4$ and the unit-norm constraint is dropped; the solutions are normalized afterwards. As shown in \cite{Ligare2020}, this linearization gives an accurate approximation of the optimal quaternion in the least-squares sense, and our results confirm that it does not affect the accuracy of SR-ARAP rotations in any significant way.
+Each $M_{ij}^T M_{ij}$ is symmetric positive semi-definite and the weights $c_{ij}$ are non-negative, so $M_i$ is a symmetric positive semi-definite $4 \times 4$ matrix.
 
-The linearized energy of the local step is then
+The bending term needs no work: $\| R_j - R_i \|^2$ is already the squared Euclidean distance of $\mathbb R^4$.
+
+\paragraph{Linearization.} Observation~(i) holds only for $|R_i| = 1$. We now drop this constraint and treat the $R_i$ as arbitrary vectors of $\mathbb R^4$. All energies of the local step then become quadratic, and their stationarity conditions linear; the quaternions are normalized after the solve. As shown in \cite{Ligare2020}, this linearization gives an accurate approximation of the optimal quaternion in the least-squares sense, and our results confirm that it does not affect the accuracy of SR-ARAP rotations in any significant way. Two things deserve a comment. First, without the unit norm nothing in the membrane term prevents the trivial answer $R_i = 0$. What keeps the rotations away from zero are the known rotations that will appear on the right-hand side of the equations: those of the constrained cells (Section~\ref{section:rotation_constraints}) and the previous rotations of the feedback term (Section~\ref{section:one_cell}). Second, $R$ and $-R$ represent the same rotation but are far apart in $\mathbb R^4$, so the bending term is meaningful only if neighboring quaternions lie in the same hemisphere; starting every local step from the previous rotations keeps them there.
+
+The linearized SR-ARAP energy of the local step is then, with the weights $w_{ij} = 1/d_i$ of Section~\ref{section:sr_arap},
 \begin{equation}
 \label{eq:local_energy}
 E(R) = \sum_{i=1}^m \Big( R_i^T M_i \, R_i + \alpha A \sum_{j \in N(i)} w_{ij} \, \| R_j - R_i \|^2 \Big).
 \end{equation}
 
-\subsection{The relaxation fixed point}
+\subsection{The equation of one cell}
+\label{section:one_cell}
 
-Relaxation minimizes each cell's energy
-\begin{equation*}
-E_i(R_i) = R_i^T M_i \, R_i + \alpha A \sum_{j \in N(i)} w_{ij} \, \| R_j - R_i \|^2
-\end{equation*}
-with the neighboring rotations $R_j$ fixed. Using $\sum_j w_{ij} = 1$,
-\begin{equation*}
-\tfrac{1}{2} \, \frac{\partial E_i}{\partial R_i} = M_i \, R_i + \alpha A \sum_{j \in N(i)} w_{ij} \, (R_i - R_j) = (M_i + \alpha A \, I) \, R_i - \alpha A \sum_{j \in N(i)} w_{ij} \, R_j ,
-\end{equation*}
-and setting it to zero gives
+We start with the simplest problem: the best rotation of a single cell $i$ when the rotations $R_j$ of its neighbors are known. It is the problem relaxation solves for one cell at a time, and its equation is the building block of everything that follows.
+
+\paragraph{Feedback.} Before writing the equation we add one term to the energy of the cell. During interactive editing only a few local/global iterations run per frame, and the rotations of one frame should stay close to those of the previous frame; otherwise they can jump between frames and, for large rotations, even reverse their sense of rotation, which shows as artifacts in the animation. We therefore let the previous rotation $R^{prev}_i$ of the cell act as one more neighbor, with weight $e > 0$ where each true neighbor has weight $1$. The energy of the cell becomes
 \begin{equation}
-\label{eqn:local_solution}
-(M_i + \alpha A \, I) \, R_i = \alpha A \sum_{j \in N(i)} w_{ij} \, R_j .
+\label{eq:cell_energy}
+\begin{gathered}
+E_i(R_i) = R_i^T M_i \, R_i + \alpha A \Big( \sum_{j \in N(i)} w_{ij} \, \| R_i - R_j \|^2 + \epsilon_i \, \| R_i - R^{prev}_i \|^2 \Big),
+\\
+w_{ij} = \frac{1}{d_i + e}, \quad \epsilon_i = \frac{e}{d_i + e}.
+\end{gathered}
 \end{equation}
-Relaxation converges, when it does, to a set of rotations satisfying (\ref{eqn:local_solution}) at every vertex simultaneously. These $4m$ equations are linear, so their common solution can be computed directly:
-\begin{equation}
-\label{eqn:local_solution_closed_form}
-(\mathrm M - \mathrm W) \, \mathrm R = 0,
-\end{equation}
-where $\mathrm R$ is the $4m \times 1$ column vector stacking the coefficients of the quaternions $R_i$, $\mathrm M$ is the $4m \times 4m$ block-diagonal matrix with blocks $M_i + \alpha A \, I$, and $\mathrm W$ is the $4m \times 4m$ matrix whose $4 \times 4$ block $(i, j)$ is $\alpha A \, w_{ij} \, I$ for $j \in N(i)$, and zero otherwise.
+The bending weights are renormalized to make room for the new neighbor: they still sum to one, $\sum_{j \in N(i)} w_{ij} + \epsilon_i = 1$, like those of SR-ARAP, and for $e = 0$ they are exactly SR-ARAP's, $w_{ij} = 1/d_i$. From now on $w_{ij}$ denotes these renormalized weights. Section~\ref{section:feedback} discusses what the feedback brings and what it costs.
 
-$\mathrm M$ is symmetric, but $\mathrm W$ is not: block $(i, j)$ is $\alpha A \, w_{ij} \, I$ while block $(j, i)$ is $\alpha A \, w_{ji} \, I$, and with per-vertex normalized weights $w_{ij} \neq w_{ji}$ whenever $d_i \neq d_j$. System (\ref{eqn:local_solution_closed_form}) is therefore not symmetric as it stands.
-
-\subsection{The true gradient of $E$}
-
-Equation (\ref{eqn:local_solution}) is the stationarity condition of each cell energy $E_i$ with respect to its own rotation, but it is not the stationarity condition of the total energy (\ref{eq:local_energy}). The rotation $R_i$ also appears in the bending terms of its neighbors' cells, so
-\begin{equation}
-\label{eq:true_gradient}
-\tfrac{1}{2} \, \frac{\partial E}{\partial R_i} = M_i \, R_i + \alpha A \sum_{j \in N(i)} (w_{ij} + w_{ji}) \, (R_i - R_j).
-\end{equation}
-The minimizer of $E$ satisfies a symmetric system with the symmetrized weights $w_{ij} + w_{ji}$; it coincides with (\ref{eqn:local_solution}) only when $w_{ij} = w_{ji}$, which per-vertex normalized weights do not satisfy. The closed-form solution of (\ref{eqn:local_solution_closed_form}), like the fixed point of relaxation, is therefore not the minimizer of (\ref{eq:local_energy}). In Section~\ref{section:exact_energy} we identify the energy it does minimize exactly.
-
-\subsection{Rotation constraints $R^{const}_i$}
-\label{section:rotation_constraints}
-
-The vertices inside the handles are constrained, $i \in \mathcal C$. Their rotations are not free variables of the local step: they are computed directly from Equation~(\ref{eqn:local_solution}), with the neighboring rotations $R^{prev}_j$ known from the previous iteration,
-\begin{equation}
-\label{eq:rotation_constraint}
-R^{const}_i = (M_i + \alpha A \, I)^{-1} \, \frac{\alpha A}{d_i} \sum_{j \in N(i)} R^{prev}_j , \qquad i \in \mathcal C,
-\end{equation}
-and normalized. Computing each constraint quaternion therefore amounts to solving a small $4 \times 4$ linear system, which is always possible since $M_i + \alpha A \, I$ is positive definite.
-
-\subsection{Rotation feedback}
-
-The system (\ref{eqn:local_solution_closed_form}) finds quaternions from scratch: it does not take into account their previous state, that is, their temporal coherence. That can lead to undesired results in an animation sequence. In particular, the sense of the rotations found in one animation step does not always match the sense of the rotations of the previous step, and the abrupt change causes animation artifacts, especially for large rotations.
-
-The previous rotation of each cell can be added to its energy as a \emph{feedback} term, which acts as a \emph{hint} towards quaternions close to the ones of the previous iteration. Given $R^{prev}_i$ and a small positive scalar $e$, we make $R_i$ a neighbor of itself: the cell energy becomes
+\paragraph{The gradient.} Two rules suffice: for a symmetric matrix $M$, the gradient of $R^T M R$ is $2 M R$; and for a fixed vector $X$, the gradient of $\| R - X \|^2$ is $2 (R - X)$. Applying them term by term,
 \begin{equation*}
-E_i(R_i) = R_i^T M_i \, R_i + \alpha A \sum_{j \in N(i)} w_{ij} \, \| R_j - R_i \|^2 + \alpha A \, \epsilon_i \, \| R_i - R^{prev}_i \|^2,
+\tfrac{1}{2} \, \frac{\partial E_i}{\partial R_i} = M_i \, R_i + \alpha A \sum_{j \in N(i)} w_{ij} \, (R_i - R_j) + \alpha A \, \epsilon_i \, (R_i - R^{prev}_i).
 \end{equation*}
-with
-\begin{equation*}
-w_{ij} = \frac{1}{d_i + e}, \qquad \epsilon_i = \frac{e}{d_i + e},
-\end{equation*}
-so that $\sum_{j \in N(i)} w_{ij} + \epsilon_i = 1$. The strength of the feedback is given by $e$. Its stationarity condition replaces (\ref{eqn:local_solution}):
+The terms that contain $R_i$ add up to $\big( M_i + \alpha A \, (\sum_j w_{ij} + \epsilon_i) \, I \big) R_i = (M_i + \alpha A \, I) \, R_i$, thanks to the normalization of the weights.
+
+\paragraph{The cell equation.} Setting the gradient to zero, the best rotation of cell $i$ satisfies
 \begin{equation}
 \label{eqn:local_solution_feedback}
 \begin{aligned}
 (M_i + \alpha A \, I) \, R_i &= \alpha A \sum_{j \in N(i)} w_{ij} \, R_j + \alpha A \, \epsilon_i \, R^{prev}_i \\
-&= \frac{\alpha A}{d_i + e} \Big( \sum_{j \in N(i)} R_j + e \, R^{prev}_i \Big),
+&= \frac{\alpha A}{d_i + e} \Big( \sum_{j \in N(i)} R_j + e \, R^{prev}_i \Big).
 \end{aligned}
 \end{equation}
-and the global system becomes
-\begin{equation}
-\label{eqn:local_solution_closed_form_const_feedback}
-(\mathrm M - \mathrm W) \, \mathrm R = \alpha A \, \mathrm E \, \mathrm R^{prev},
-\qquad \text{s.t.} \ R_i = R^{const}_i \ \text{for} \ i \in \mathcal C,
-\end{equation}
-where $\mathrm E$ is the block-diagonal matrix with blocks $\epsilon_i I$ and $\mathrm R^{prev}$ is the $4m \times 1$ column vector stacking the quaternions $R^{prev}_i$ of the previous iteration.
+The right-hand side is a weighted average of the neighbors' rotations and the previous rotation, scaled by $\alpha A$; the matrix on the left adds the membrane term of the cell, which pulls the average towards the rotation that best fits the cell's own edges. Since $M_i \succeq 0$, the matrix $M_i + \alpha A \, I \succeq \alpha A \, I$ is positive definite, so for given neighbors (\ref{eqn:local_solution_feedback}) has a unique solution, found with one $4 \times 4$ linear solve. Relaxation sweeps through the cells and solves (\ref{eqn:local_solution_feedback}) for each one with the current rotations of its neighbors: it is a block Gauss--Seidel iteration, and after a few sweeps its rotations satisfy (\ref{eqn:local_solution_feedback}) only approximately.
 
-\paragraph{Benefits and cost of the feedback.} The feedback term has four benefits. (i)~\emph{Temporal coherence}: during interactive editing only a few iterations run per frame, and the feedback keeps every local step close to the previous one, so rotations do not pop between frames. (ii)~\emph{Large rotations}: near and beyond $180^\circ$ the linearized fit has two nearly equivalent senses of rotation; anchoring each cell to its previous rotation favors the branch it was following, which prevents the abrupt changes in the sense of rotation described above and lets a large twist spread evenly along the surface as it grows (Section~\ref{section:results_twist}). (iii)~\emph{Conditioning}: it bounds the smallest eigenvalue of the rotation system by $e$ for any mesh and any constraint set (Proposition~\ref{prop:rotation_spd}), so the system stays solvable even without constraints, and iterative solvers of it converge in a number of iterations independent of the mesh (Section~\ref{section:results}). (iv)~\emph{Little bias}: it barely changes the converged shape (Remark~\ref{rem:feedback_bias}). Its cost is a damping of the outer local/global loop, which needs more iterations to reach its fixed point when the rotations are large.
+\subsection{All cells at once}
+\label{section:all_cells}
 
-\begin{rem}
-\label{rem:feedback_bias}
-At a fixed point of the local/global loop the rotations no longer change, $R_i = R^{prev}_i$, so (\ref{eqn:local_solution_feedback}) becomes $(M_i + \alpha A \, I) R_i = \frac{\alpha A}{d_i + e} \big( \sum_{j} R_j + e R_i \big)$, that is,
+Instead of solving the cell equations one at a time, we now ask for rotations that satisfy (\ref{eqn:local_solution_feedback}) at every cell simultaneously; these are the rotations relaxation converges to. Every cell equation is linear in the rotations, so together they form one linear system, with four equations and four unknowns per cell. For the moment we treat every cell as unknown; the constrained cells are handled in Section~\ref{section:rotation_constraints}.
+
+\paragraph{The system is not symmetric.} Moving the neighbors to the left, the equations of cell $i$ read
 \begin{equation*}
-\Big( \frac{d_i + e}{d_i} \, M_i + \alpha A \, I \Big) R_i = \frac{\alpha A}{d_i} \sum_{j \in N(i)} R_j .
+(M_i + \alpha A \, I) \, R_i - \frac{\alpha A}{d_i + e} \sum_{j \in N(i)} R_j = \alpha A \, \epsilon_i \, R^{prev}_i .
 \end{equation*}
-This is the fixed point without feedback, (\ref{eqn:local_solution}) with $w_{ij} = 1/d_i$, except that the membrane term of each cell is weighted by $(d_i + e)/d_i$, about $1.03$ for $e = 0.2$ and a typical valence of 6. The feedback therefore acts as a proximal damping of the iterations rather than as a change of the model. On the bar bent into a $90^\circ$ arc, the shapes converged with $e = 0.2$ and with $e = 0$ (3{,}000 iterations each) differ by at most $0.33\%$ of the bar's length, and their ARAP distortions by $0.9\%$.
-\end{rem}
+The coefficient of $R_j$ in the equations of cell $i$ is $-\frac{\alpha A}{d_i + e} \, I$, while the coefficient of $R_i$ in the equations of cell $j$ is $-\frac{\alpha A}{d_j + e} \, I$. The two differ whenever $d_i \neq d_j$, which happens on every mesh that is not perfectly regular, so the system is not symmetric.
 
-\subsection{Symmetric form and the exact energy}
-\label{section:exact_energy}
+\paragraph{Why symmetry matters.} A symmetric positive definite system can be solved with a Cholesky factorization, which needs no pivoting and half the work of an LU factorization, or by conjugate gradients, which only need products with the matrix. Moreover, a symmetric system is the stationarity condition of an energy (Section~\ref{section:exact_energy}), which tells us what its solution minimizes. None of this is available for a non-symmetric system.
 
-Multiplying the four equations of vertex $i$ in (\ref{eqn:local_solution_feedback}) by $s_i = (d_i + e) / (\alpha A)$ makes every off-diagonal block equal to $-I$:
+\paragraph{Restoring symmetry.} Multiplying the equations of a cell by a nonzero number does not change the solution. Multiplying those of cell $i$ by
+\begin{equation*}
+s_i = \frac{d_i + e}{\alpha A}
+\end{equation*}
+turns every coupling coefficient into $-I$:
 \begin{equation}
 \label{eqn:local_symmetric}
-s_i \, (M_i + \alpha A \, I) \, R_i - \sum_{j \in N(i)} R_j = e \, R^{prev}_i , \qquad s_i = \frac{d_i + e}{\alpha A}.
+s_i \, (M_i + \alpha A \, I) \, R_i - \sum_{j \in N(i)} R_j = e \, R^{prev}_i .
 \end{equation}
-This scaling of the rows does not change the solution. In matrix form, (\ref{eqn:local_symmetric}) reads $\mathrm K \, \mathrm R = e \, \mathrm R^{prev}$, where $\mathrm K$ has the diagonal blocks $s_i (M_i + \alpha A \, I)$ and the block $-I$ in positions $(i, j)$ and $(j, i)$ for every edge $\{i, j\}$. The matrix $\mathrm K$ is symmetric.
+In matrix form this is $\mathrm K \, \mathrm R = e \, \mathrm R^{prev}$, where $\mathrm R$ and $\mathrm R^{prev}$ are the $4m \times 1$ column vectors stacking the coefficients of the quaternions $R_i$ and $R^{prev}_i$, and $\mathrm K$ is the $4m \times 4m$ matrix with $4 \times 4$ blocks
+\begin{equation*}
+\mathrm K_{ii} = s_i \, (M_i + \alpha A \, I), \qquad
+\mathrm K_{ij} = -I \ \text{if} \ \{i, j\} \in \mathcal E, \qquad
+\mathrm K_{ij} = 0 \ \text{otherwise}.
+\end{equation*}
+$\mathrm K$ is symmetric, because the adjacency of the mesh is.
+
+\subsection{The energy minimized by the system}
+\label{section:exact_energy}
+
+A symmetric linear system always comes from an energy. If $\mathrm K$ is symmetric, the gradient of $f(x) = \frac{1}{2} x^T \mathrm K x - b^T x$ is $\mathrm K x - b$, so $\mathrm K x = b$ states that $x$ is a stationary point of $f$; if $\mathrm K$ is moreover positive definite, $f$ is strictly convex and its stationary point is its unique minimizer. The following proposition writes this energy for the rotation system in terms of the mesh.
 
 \begin{prop}
 \label{prop:exact_energy}
@@ -310,10 +313,10 @@ The system $\mathrm K \, \mathrm R = e \, \mathrm R^{prev}$ is the exact station
 + \alpha A \sum_{\{i,j\} \in \mathcal E} \| R_i - R_j \|^2
 + \alpha A \, e \sum_{i=1}^m \| R_i - R^{prev}_i \|^2 ,
 \end{equation}
-where $\mathcal E$ is the set of mesh edges, each counted once. Its unique minimizer is the closed-form solution of (\ref{eqn:local_solution_closed_form_const_feedback}) without constraints, and also the fixed point that relaxation of (\ref{eqn:local_solution_feedback}) converges to.
+where $\mathcal E$ is the set of mesh edges, each counted once. Its unique minimizer is therefore the set of rotations that satisfies the cell equation (\ref{eqn:local_solution_feedback}) at every cell simultaneously.
 \end{prop}
 \begin{proof}
-Each edge $\{i, j\}$ incident to $i$ contributes $2 \alpha A (R_i - R_j)$ to $\partial \tilde E / \partial R_i$, so
+We compute the gradient of $\tilde E$ with respect to $R_i$ term by term. The membrane term contributes $2 (d_i + e) M_i R_i$. The edge $\{i, j\}$ appears once in the bending sum and contributes $2 \alpha A (R_i - R_j)$; vertex $i$ has $d_i$ such edges. The feedback term contributes $2 \alpha A e (R_i - R^{prev}_i)$. Hence
 \begin{align*}
 \tfrac{1}{2} \, \frac{\partial \tilde E}{\partial R_i}
 &= (d_i + e) \, M_i \, R_i + \alpha A \sum_{j \in N(i)} (R_i - R_j) + \alpha A \, e \, (R_i - R^{prev}_i) \\
@@ -323,45 +326,77 @@ Each edge $\{i, j\}$ incident to $i$ contributes $2 \alpha A (R_i - R_j)$ to $\p
 which vanishes exactly when (\ref{eqn:local_symmetric}) holds. The first two terms of $\tilde E$ are positive semi-definite quadratic forms and the feedback term is positive definite, so $\tilde E$ is strictly convex and its stationary point is its unique minimizer.
 \end{proof}
 
-$\tilde E$ is the linearized SR-ARAP energy with three differences: the membrane term of cell $i$ is weighted by $d_i + e$, the bending term is the symmetric, unweighted sum over edges, and the feedback appears as an explicit proximal term towards the previous rotations. The closed-form local step is thus not an approximation of relaxation: it is the exact minimizer of $\tilde E$, which relaxation can only approach iteratively.
+$\tilde E$ is the linearized SR-ARAP energy (\ref{eq:local_energy}) with three differences: the membrane term of cell $i$ is weighted by $d_i + e$, the bending term is the symmetric, unweighted sum over edges, and the feedback appears as an explicit proximal term towards the previous rotations. Solving $\mathrm K \, \mathrm R = e \, \mathrm R^{prev}$ is thus not an approximation of relaxation: it gives in one step the exact minimizer of $\tilde E$, which relaxation can only approach iteratively. We call this solution the \emph{closed form} of the local step.
 
 \begin{rem}
-The symmetrized gradient (\ref{eq:true_gradient}) gives another symmetric formulation, with the weights $w_{ij} + w_{ji}$, whose solution is the exact minimizer of $E$ itself. Formulation (\ref{eqn:local_symmetric}) is the one that matches relaxation of (\ref{eqn:local_solution_feedback}).
+\label{rem:true_gradient}
+Why does the system not minimize the sum of the cell energies, (\ref{eq:local_energy})? Each cell equation minimizes $E_i$ over $R_i$ with the neighbors held fixed, but in the total energy $R_i$ also appears in the bending terms of its neighbors' cells, so
+\begin{equation}
+\label{eq:true_gradient}
+\tfrac{1}{2} \, \frac{\partial E}{\partial R_i} = M_i \, R_i + \alpha A \sum_{j \in N(i)} (w_{ij} + w_{ji}) \, (R_i - R_j).
+\end{equation}
+The cell equations ignore the second weight, $w_{ji}$, and the two conditions coincide only when $w_{ij} = w_{ji}$, which per-vertex normalized weights do not satisfy. Minimizing $E$ itself would lead to another symmetric system, with the weights $w_{ij} + w_{ji}$. We keep (\ref{eqn:local_symmetric}) because its equations are the cell equations themselves: every rotation is the best one for its own cell given its neighbors, as in the cell-by-cell formulation, and relaxation of (\ref{eqn:local_solution_feedback}) converges to the same solution (Section~\ref{section:rotation_constraints}), which lets us measure the error of relaxation exactly (Section~\ref{section:results}).
 \end{rem}
 
-\subsection{Rotation constraints and solution}
+\subsection{Constrained rotations and positive definiteness}
+\label{section:rotation_constraints}
 
-With the rotations of the constrained vertices fixed by (\ref{eq:rotation_constraint}), the rows of the free vertices $\mathcal F$ read $\mathrm K_{\mathcal F \mathcal F} \, \mathrm R_{\mathcal F} + \mathrm K_{\mathcal F \mathcal C} \, \mathrm R^{const}_{\mathcal C} = e \, \mathrm R^{prev}_{\mathcal F}$. Since the off-diagonal blocks of $\mathrm K$ are $-I$, the four equations of a free vertex $i$ become
+The vertices inside the handles are constrained, $i \in \mathcal C$. Their positions are prescribed, and their rotations are not unknowns of the local step either: each is computed directly from the cell equation without feedback ($e = 0$), with the neighboring rotations $R^{prev}_j$ of the previous iteration,
+\begin{equation}
+\label{eq:rotation_constraint}
+R^{const}_i = (M_i + \alpha A \, I)^{-1} \, \frac{\alpha A}{d_i} \sum_{j \in N(i)} R^{prev}_j , \qquad i \in \mathcal C,
+\end{equation}
+and normalized. Each constrained rotation therefore costs one $4 \times 4$ linear solve, which is always possible since $M_i + \alpha A \, I$ is positive definite.
+
+\paragraph{The reduced system.} As in the global step, we keep only the equations of the free cells $\mathcal F$ and move the known rotations to the right: $\mathrm K_{\mathcal F \mathcal F} \, \mathrm R_{\mathcal F} = e \, \mathrm R^{prev}_{\mathcal F} - \mathrm K_{\mathcal F \mathcal C} \, \mathrm R^{const}_{\mathcal C}$. Since the coupling blocks of $\mathrm K$ are $-I$, the four equations of a free cell $i$ read
 \begin{equation}
 \label{eqn:local_reduced}
-s_i \, (M_i + \alpha A \, I) \, R_i - \sum_{j \in N(i) \cap \mathcal F} R_j = e \, R^{prev}_i + \sum_{j \in N(i) \cap \mathcal C} R^{const}_j , \qquad i \in \mathcal F.
+s_i \, (M_i + \alpha A \, I) \, R_i - \sum_{j \in N(i) \cap \mathcal F} R_j = e \, R^{prev}_i + \sum_{j \in N(i) \cap \mathcal C} R^{const}_j , \qquad i \in \mathcal F:
 \end{equation}
-Equivalently, $\mathrm R_{\mathcal F}$ is the minimizer of $\tilde E$ over the free rotations, with the constrained ones fixed to $R^{const}_i$.
+a constrained neighbor simply adds its rotation to the right-hand side. Equivalently, $\mathrm R_{\mathcal F}$ minimizes $\tilde E$ over the free rotations, with the constrained ones fixed to $R^{const}_i$.
 
 \begin{prop}
 \label{prop:rotation_spd}
 $\mathrm K_{\mathcal F \mathcal F}$ is symmetric positive definite, with smallest eigenvalue at least $e$.
 \end{prop}
 \begin{proof}
-It is a principal submatrix of the symmetric matrix $\mathrm K$. Since $M_i$ is positive semi-definite, $s_i (M_i + \alpha A \, I) \succeq s_i \, \alpha A \, I = (d_i + e) \, I$. For $x \in \mathbb R^{4 |\mathcal F|}$ with blocks $x_i$, using $2 \, x_i \cdot x_j \leq \|x_i\|^2 + \|x_j\|^2$ on every edge between free vertices,
+It is a principal submatrix of the symmetric matrix $\mathrm K$, so it is symmetric. Since $M_i$ is positive semi-definite, the diagonal blocks satisfy $s_i (M_i + \alpha A \, I) \succeq s_i \, \alpha A \, I = (d_i + e) \, I$. For $x \in \mathbb R^{4 |\mathcal F|}$ with blocks $x_i$, each edge between two free vertices contributes $-2 \, x_i \cdot x_j \geq -\|x_i\|^2 - \|x_j\|^2$ to $x^T \mathrm K_{\mathcal F \mathcal F} \, x$, so vertex $i$ loses at most $\|x_i\|^2$ per free neighbor, and it has at most $d_i$ of them:
 \begin{equation*}
 x^T \mathrm K_{\mathcal F \mathcal F} \, x \geq \sum_{i \in \mathcal F} (d_i + e) \, \|x_i\|^2 - \sum_{i \in \mathcal F} |N(i) \cap \mathcal F| \, \|x_i\|^2 \geq e \, \|x\|^2 . \qedhere
 \end{equation*}
 \end{proof}
 
-Unlike Proposition~\ref{prop:laplacian_spd}, this holds for any constraint set, even an empty one, thanks to the feedback term. System (\ref{eqn:local_reduced}) can therefore be solved with a sparse Cholesky factorization, and no least-squares formulation is needed. Its sparsity pattern is that of the mesh graph with $4 \times 4$ blocks and depends only on the mesh and the constraint set, so the symbolic analysis (the fill-reducing ordering) is computed once. The values, however, change in every iteration, since $M_i$ depends on the deformed positions, so a direct solve costs one numeric factorization per local step, whose cost grows as $n^{1.5}$ on surface meshes. The next section removes that factorization. In either case the solution quaternions $R_i$ are normalized afterwards.
+Three consequences follow. First, unlike Proposition~\ref{prop:laplacian_spd}, the result holds for any constraint set, even an empty one: the feedback term alone makes the system positive definite. Second, relaxation converges: it is block Gauss--Seidel on (\ref{eqn:local_reduced}), and Gauss--Seidel converges from any starting point for every symmetric positive definite matrix, a classical result of numerical linear algebra, so the closed form and relaxation share the same solution. Third, (\ref{eqn:local_reduced}) can be solved with a sparse Cholesky factorization, with no least-squares formulation. Its sparsity pattern is that of the mesh graph with $4 \times 4$ blocks and depends only on the mesh and the constraint set, so the symbolic analysis (the fill-reducing ordering) is computed once. The values, however, change in every iteration, since $M_i$ depends on the deformed positions, so a direct solve costs one numeric factorization per local step, whose cost grows as $n^{1.5}$ on surface meshes. Section~\ref{section:pcg} removes that factorization. In either case the quaternions $R_i$ are normalized after the solve.
+
+\subsection{The role of the feedback}
+\label{section:feedback}
+
+With the system and its properties in hand, we can now say precisely what the feedback term of Section~\ref{section:one_cell} contributes. It has four benefits. (i)~\emph{Temporal coherence}: during interactive editing only a few iterations run per frame, and the feedback keeps every local step close to the previous one, so rotations do not pop between frames. (ii)~\emph{Large rotations}: near and beyond $180^\circ$ the linearized fit has two nearly equivalent senses of rotation; anchoring each cell to its previous rotation favors the branch it was following, which prevents abrupt changes in the sense of rotation and lets a large twist spread evenly along the surface as it grows (Section~\ref{section:results_twist}). (iii)~\emph{Conditioning}: it bounds the smallest eigenvalue of the rotation system by $e$ for any mesh and any constraint set (Proposition~\ref{prop:rotation_spd}), so the system stays solvable even without constraints, and iterative solvers of it converge in a number of iterations independent of the mesh (Section~\ref{section:results}). (iv)~\emph{Little bias}: it barely changes the converged shape (Remark~\ref{rem:feedback_bias}). Its cost is a damping of the outer local/global loop, which needs more iterations to reach its fixed point when the rotations are large.
+
+\begin{rem}
+\label{rem:feedback_bias}
+How much does the feedback change the answer? At a fixed point of the local/global loop the rotations no longer change, $R_i = R^{prev}_i$, so (\ref{eqn:local_solution_feedback}) becomes $(M_i + \alpha A \, I) R_i = \frac{\alpha A}{d_i + e} \big( \sum_{j} R_j + e R_i \big)$. Moving the term $e R_i$ to the left gives $M_i R_i + \frac{\alpha A \, d_i}{d_i + e} R_i = \frac{\alpha A}{d_i + e} \sum_j R_j$, and multiplying by $(d_i + e)/d_i$,
+\begin{equation*}
+\Big( \frac{d_i + e}{d_i} \, M_i + \alpha A \, I \Big) R_i = \frac{\alpha A}{d_i} \sum_{j \in N(i)} R_j .
+\end{equation*}
+This is the cell equation without feedback, (\ref{eqn:local_solution_feedback}) with $e = 0$, except that the membrane term of each cell is weighted by $(d_i + e)/d_i$, about $1.03$ for $e = 0.2$ and a typical valence of 6. The feedback therefore acts as a proximal damping of the iterations rather than as a change of the model. On the bar bent into a $90^\circ$ arc, the shapes converged with $e = 0.2$ and with $e = 0$ (3{,}000 iterations each) differ by at most $0.33\%$ of the bar's length, and their ARAP distortions by $0.9\%$.
+\end{rem}
 
 \subsection{Solving the rotation system in near-linear time}
 \label{section:pcg}
 
-Write $\mathrm K_{\mathcal F \mathcal F}$ as the sum of a part that changes with the positions and a part that does not:
+\paragraph{The cost of a direct solve.} A sparse Cholesky factorization of $\mathrm K_{\mathcal F \mathcal F}$ creates fill-in: with the best orderings, nested dissection, a surface mesh of $n$ vertices produces $O(n \log n)$ nonzeros in the factor and costs $O(n^{1.5})$ operations to factor. The global step pays this price once, because its matrix does not change. The rotation system pays it in every local step, because its diagonal blocks contain the matrices $M_i$, which depend on the deformed positions. The remedy is to separate the part of $\mathrm K_{\mathcal F \mathcal F}$ that changes from the part that does not.
+
+\paragraph{Splitting the matrix.} Write
 \begin{equation}
 \label{eq:K_split}
-\mathrm K_{\mathcal F \mathcal F} = \mathrm C \otimes I_4 + \mathrm B,
+\mathrm K_{\mathcal F \mathcal F} = \mathrm C \otimes I_4 + \mathrm D,
 \qquad
-\mathrm B = \mathrm{diag}\big( s_i M_i \big)_{i \in \mathcal F},
+\mathrm D = \mathrm{diag}\big( s_i M_i \big)_{i \in \mathcal F},
 \end{equation}
-where $\mathrm C$ is the $|\mathcal F| \times |\mathcal F|$ scalar matrix with diagonal $s_i (\alpha A + \eta)$ and the entry $-1$ for every edge between free vertices, and $\eta$ is the small diagonal regularization of Section~\ref{section:implementation}. $\mathrm C$ acts identically on the four quaternion components and depends only on the mesh, the constraint set and the feedback weight; $\mathrm B$ is block diagonal and positive semi-definite, and carries all the dependence on the deformed positions.
+where $\mathrm C$ is the $|\mathcal F| \times |\mathcal F|$ scalar matrix with diagonal $s_i (\alpha A + \eta)$ and the entry $-1$ for every edge between free vertices, and $\eta$ is the small diagonal regularization of Section~\ref{section:implementation}. The Kronecker product $\mathrm C \otimes I_4$ is the matrix that applies $\mathrm C$ to each of the four quaternion components separately: arranging the rotations as an $|\mathcal F| \times 4$ matrix, one column per component, it multiplies that matrix by $\mathrm C$. $\mathrm C$ depends only on the mesh, the constraint set and the feedback weight. $\mathrm D$ is block diagonal and positive semi-definite, and carries all the dependence on the deformed positions.
+
+\paragraph{Conjugate gradients.} For a symmetric positive definite system, the conjugate gradient method needs only products with the matrix, and its error, measured in the energy norm, decreases at least by the factor $(\sqrt{\kappa} - 1)/(\sqrt{\kappa} + 1)$ per iteration, where $\kappa$ is the condition number of the matrix. The preconditioned method (PCG) uses a second symmetric positive definite matrix $\mathrm P$, the preconditioner, and behaves like conjugate gradients on $\mathrm P^{-1} \mathrm K_{\mathcal F \mathcal F}$; each iteration then also solves one system with $\mathrm P$. A good preconditioner is close to the matrix, so that $\kappa(\mathrm P^{-1} \mathrm K_{\mathcal F \mathcal F})$ is small, and cheap to solve with. The constant part $\mathrm P = \mathrm C \otimes I_4$ is a natural candidate on both counts: it is all of $\mathrm K_{\mathcal F \mathcal F}$ except the positive semi-definite part $\mathrm D$, and since it does not change, it can be factored once, like the Laplacian of the global step. The following proposition shows how good it is.
 
 \begin{prop}
 \label{prop:conditioning}
@@ -373,15 +408,16 @@ Let $\mu = \max_{i \in \mathcal F} s_i \, \lambda_{\max}(M_i)$ and $d_{\max} = \
 \end{equation*}
 \end{prop}
 \begin{proof}
-The diagonal of $\mathrm C$ is $s_i (\alpha A + \eta) = (d_i + e)(1 + \eta / \alpha A) \geq d_i + e$ and its off-diagonal entries in row $i$ sum in absolute value to at most $d_i$, so by Gershgorin's theorem the eigenvalues of $\mathrm C$ lie in $[e, (2 d_{\max} + e)(1 + \eta / \alpha A)]$. Since $0 \preceq \mathrm B \preceq \mu I$, the eigenvalues of $\mathrm K_{\mathcal F \mathcal F}$ lie in $[e, (2 d_{\max} + e)(1 + \eta / \alpha A) + \mu]$, which gives the first bound. For the second, the generalized Rayleigh quotient is
+The diagonal of $\mathrm C$ is $s_i (\alpha A + \eta) = (d_i + e)(1 + \eta / \alpha A) \geq d_i + e$ and its off-diagonal entries in row $i$ sum in absolute value to at most $d_i$, so by Gershgorin's theorem the eigenvalues of $\mathrm C$, and hence those of $\mathrm C \otimes I_4$, lie in $[e, (2 d_{\max} + e)(1 + \eta / \alpha A)]$. The diagonal blocks of $\mathrm D$ are $s_i M_i$, with eigenvalues between $0$ and $\mu$, so $0 \preceq \mathrm D \preceq \mu I$. Adding the two, the eigenvalues of $\mathrm K_{\mathcal F \mathcal F}$ lie in $[e, (2 d_{\max} + e)(1 + \eta / \alpha A) + \mu]$, and the ratio of the endpoints is bounded by the first expression. For the second bound, the eigenvalues of $(\mathrm C \otimes I_4)^{-1} \mathrm K_{\mathcal F \mathcal F}$ are the values of the generalized Rayleigh quotient
 \begin{equation*}
-\frac{x^T \mathrm K_{\mathcal F \mathcal F} \, x}{x^T (\mathrm C \otimes I_4) \, x} = 1 + \frac{x^T \mathrm B \, x}{x^T (\mathrm C \otimes I_4) \, x} \in \Big[ 1, \, 1 + \frac{\mu}{e} \Big]. \qedhere
+\frac{x^T \mathrm K_{\mathcal F \mathcal F} \, x}{x^T (\mathrm C \otimes I_4) \, x} = 1 + \frac{x^T \mathrm D \, x}{x^T (\mathrm C \otimes I_4) \, x} \in \Big[ 1, \, 1 + \frac{\mu}{e} \Big],
 \end{equation*}
+since $0 \leq x^T \mathrm D \, x \leq \mu \|x\|^2$ and $x^T (\mathrm C \otimes I_4) \, x \geq e \|x\|^2$.
 \end{proof}
 
-Both bounds are independent of the resolution of the mesh. Moreover $\mu$ decreases under refinement: $\lambda_{\max}(M_i) \leq \mathrm{tr}\, M_i = 4 \sum_j c_{ij} (\|p_{ij}\|^2 + \|q_{ij}\|^2)$ scales with the squared edge length, so for a uniform refinement of a fixed surface with bounded stretching $\mu = O(1/n)$, and the preconditioned condition number tends to 1. We therefore solve (\ref{eqn:local_reduced}) by the preconditioned conjugate gradient method (PCG) with preconditioner $\mathrm C \otimes I_4$, warm-started from the previous rotations. Since the error of PCG decreases by at least $(\sqrt{\kappa} - 1)/(\sqrt{\kappa} + 1)$ per iteration, the number of iterations needed for a given accuracy is bounded independently of the mesh, and decreases as it is refined.
+\paragraph{What the bounds say.} Both bounds are independent of the resolution of the mesh. Moreover $\mu$ decreases under refinement: $\lambda_{\max}(M_i) \leq \mathrm{tr}\, M_i = 4 \sum_j c_{ij} (\|p_{ij}\|^2 + \|q_{ij}\|^2)$ (Section~\ref{section:the_form_of_arap_matrix}) scales with the squared edge length, while $s_i$ does not depend on the resolution, so for a uniform refinement of a fixed surface with bounded stretching $\mu = O(1/n)$, and the preconditioned condition number tends to 1. We therefore solve (\ref{eqn:local_reduced}) by PCG with preconditioner $\mathrm C \otimes I_4$, warm-started from the previous rotations. By the convergence rate above, the number of iterations needed for a given accuracy is bounded independently of the mesh, and decreases as it is refined.
 
-$\mathrm C$ is factored once per constraint set with a sparse Cholesky factorization, like the Poisson systems of Sections~\ref{section:global_step} and~\ref{section:harmonic_interpolation_rotors}. Every PCG iteration then costs one product with $\mathrm K_{\mathcal F \mathcal F}$, which is $O(n)$, and one application of the preconditioner: two triangular solves with four right-hand sides, $O(n \log n)$ for the nested-dissection orderings of surface meshes. A local step therefore costs $O(n \log n)$, instead of the $O(n^{1.5})$ of a numeric factorization. We stop PCG at a relative residual of $10^{-12}$, where its rotations match those of the direct solve to within $10^{-12}$~rad, so the method keeps the exactness of the closed form. Without a preconditioner, conjugate gradients also converges in a mesh-independent number of iterations by the first bound of Proposition~\ref{prop:conditioning}, at $O(n)$ per iteration: a linear-time solver, at the price of more iterations.
+\paragraph{Cost.} $\mathrm C$ is factored once per constraint set with a sparse Cholesky factorization, like the Poisson systems of Sections~\ref{section:global_step} and~\ref{section:harmonic_interpolation_rotors}. Every PCG iteration then costs one product with $\mathrm K_{\mathcal F \mathcal F}$, which is $O(n)$, and one application of the preconditioner: two triangular solves with four right-hand sides, $O(n \log n)$ for the nested-dissection orderings of surface meshes. A local step therefore costs $O(n \log n)$, instead of the $O(n^{1.5})$ of a numeric factorization. We stop PCG at a relative residual of $10^{-12}$, where its rotations match those of the direct solve to within $10^{-12}$~rad, so the method keeps the exactness of the closed form. Without a preconditioner, conjugate gradients also converges in a mesh-independent number of iterations by the first bound of Proposition~\ref{prop:conditioning}, at $O(n)$ per iteration: a linear-time solver, at the price of more iterations.
 
 \section{Multiresolution Optimization}
 
@@ -394,13 +430,13 @@ Once the optimal deformed shape of the control mesh is found, the optimized rota
 Algorithm~\ref{alg:frame} summarizes one interactive frame.
 
 \begin{algorithm}[H]
-\caption{One interactive frame. The Cholesky factorizations of Sections~\ref{section:global_step} and~\ref{section:harmonic_interpolation_rotors}, and the symbolic analysis of (\ref{eqn:local_reduced}), are computed once per constraint set.}
+\caption{One interactive frame. The Cholesky factorizations of Sections~\ref{section:global_step} and~\ref{section:harmonic_interpolation_rotors}, and that of the preconditioner $\mathrm C$ of Section~\ref{section:pcg}, are computed once per constraint set.}
 \label{alg:frame}
 \begin{algorithmic}[1]
 \STATE Set the positional constraints $p^{const}_i$ of the control mesh from the handle transformations.
 \FOR{$k = 1$ to $K$}
   \STATE Compute $M_i$ for every control vertex from the current positions (Section~\ref{section:the_form_of_arap_matrix}).
-  \STATE Compute $R^{const}_i$, $i \in \mathcal C$, from (\ref{eq:rotation_constraint}); solve (\ref{eqn:local_reduced}) for $R_i$, $i \in \mathcal F$; normalize all $R_i$.
+  \STATE Compute $R^{const}_i$, $i \in \mathcal C$, from (\ref{eq:rotation_constraint}); solve (\ref{eqn:local_reduced}) for $R_i$, $i \in \mathcal F$, by PCG from the previous rotations; normalize all $R_i$.
   \STATE Solve the global step (\ref{eq:global_reduced}) on the control mesh.
 \ENDFOR
 \STATE Interpolate the control rotations onto the full-resolution mesh (\ref{eq:harmonic_reduced}) and normalize them.
@@ -442,50 +478,62 @@ which has the same matrix as the full-resolution global step, whose constrained 
 As noted in Section~\ref{section:local_step}, for a unit quaternion $R_i$ the membrane term equals
 \begin{equation*}
 \sum_j c_{ij} \, \| R_i \, q_{ij} \, \tilde R_i - p_{ij} \|^2 = \sum_j c_{ij} \, \| R_i \, q_{ij} - p_{ij} \, R_i \|^2 .
-\end{equation*} Write $R_i = w_i + B_i$, with scalar part $w_i$ and pure quaternion part $B_i$. Expanding the quaternion products in terms of the inner and cross products gives
+\end{equation*}
+We now compute the matrix $M_{ij}$ that represents $R_i \, q_{ij} - p_{ij} \, R_i$ and the matrix $M_i$ of the cell.
+
+\paragraph{Expanding the products.} Write $R_i = w_i + B_i$, with scalar part $w_i$ and pure quaternion part $B_i$. For pure quaternions $u$ and $v$ the quaternion product is $u \, v = -u \cdot v + u \times v$, a scalar part and a vector part. Since the scalar $w_i$ commutes with everything,
+\begin{equation*}
+R_i \, q_{ij} = -B_i \cdot q_{ij} + w_i \, q_{ij} + B_i \times q_{ij},
+\qquad
+p_{ij} \, R_i = -p_{ij} \cdot B_i + w_i \, p_{ij} + p_{ij} \times B_i .
+\end{equation*}
+Subtracting, and using $B \times q + B \times p = -(q + p) \times B$,
 \begin{equation}
-     R_i \, q_{ij} - p_{ij} \, R_i = -\, d_{ij} \cdot B_i + w_i \, d_{ij} - s_{ij} \times B_i ,
-     \qquad d_{ij} = q_{ij} - p_{ij}, \quad s_{ij} = q_{ij} + p_{ij},
+     R_i \, q_{ij} - p_{ij} \, R_i = -\, a_{ij} \cdot B_i + w_i \, a_{ij} - b_{ij} \times B_i ,
+     \qquad a_{ij} = q_{ij} - p_{ij}, \quad b_{ij} = q_{ij} + p_{ij},
 \end{equation}
-where the first term is the scalar part and the last two are the vector part. In matrix form,
+where the first term is the scalar part and the last two are the vector part.
+
+\paragraph{The matrix $M_{ij}$.} Representing $R_i$ as the $4 \times 1$ column vector made of the scalar $w_i$ and the $3 \times 1$ column vector $B_i$, the same expression in matrix form is
 \begin{equation}
 	M_{ij} R_i =
 	\left[\begin{array}{cc}
-		0        &       -d_{ij}^T \\
-		d_{ij}  &   \left[ s_{ij} \right]^T_\times \\
+		0        &       -a_{ij}^T \\
+		a_{ij}  &   -\left[ b_{ij} \right]_\times \\
 	\end{array}\right]
 	\left[\begin{array}{c}
 		w_i \\
 		B_i
 	\end{array}\right] =
 	\left[\begin{array}{c}
-		-d_{ij}^T B_i \\
-		w_i \, d_{ij} - s_{ij} \times B_i
+		-a_{ij}^T B_i \\
+		w_i \, a_{ij} - b_{ij} \times B_i
 	\end{array}\right],
 \end{equation}
-where $d_{ij}$ and $s_{ij}$ are $3 \times 1$ column vectors holding pure quaternion coefficients and $M_{ij}$ is a skew-symmetric $4 \times 4$ real matrix, $M_{ij}^T = -M_{ij}$. The quaternion $R_i$ is represented as the $4 \times 1$ column vector made of the scalar $w_i$ and the $3 \times 1$ column vector $B_i$. The $3 \times 3$ matrix $\left[ s_{ij} \right]_\times$ is the skew-symmetric cross-product matrix, $\left[ s \right]_\times x = s \times x$.
+where $a_{ij}$ and $b_{ij}$ are $3 \times 1$ column vectors and $\left[ b \right]_\times$ is the skew-symmetric cross-product matrix, $\left[ b \right]_\times x = b \times x$. Since $\left[ b_{ij} \right]_\times$ is skew-symmetric and the two off-diagonal blocks are $-a_{ij}^T$ and $a_{ij}$, $M_{ij}$ is a skew-symmetric $4 \times 4$ real matrix, $M_{ij}^T = -M_{ij}$.
 
-The membrane term is then the quadratic form $R_i^T M_i \, R_i$ with $M_i = \sum_{j} c_{ij} \, M_{ij}^T M_{ij}$, as in (\ref{eq:membrane_quadratic}). Each product $M_{ij}^T M_{ij}$ is symmetric and positive semi-definite, and since $c_{ij} \geq 0$ so is $M_i$: all its eigenvalues are real and non-negative. Using $M_{ij}^T = -M_{ij}$,
+\paragraph{The product $M_{ij}^T M_{ij}$.} Multiplying the blocks of $M_{ij}^T$ and $M_{ij}$, and using $-a^T [b]_\times = ([b]_\times a)^T = (b \times a)^T$,
 \begin{equation}
 	M_{ij}^T M_{ij} =
 	\left[\begin{array}{cc}
-		\| d_{ij} \|^2       &         (s_{ij} \times d_{ij})^T \\
-		s_{ij} \times d_{ij}  &    d_{ij} d_{ij}^T - \left[ s_{ij} \right]^2_\times \\
+		\| a_{ij} \|^2       &         (b_{ij} \times a_{ij})^T \\
+		b_{ij} \times a_{ij}  &    a_{ij} a_{ij}^T - \left[ b_{ij} \right]^2_\times \\
 	\end{array}\right].
 \end{equation}
+It is symmetric and positive semi-definite, as every matrix of the form $X^T X$, and since $c_{ij} \geq 0$ so is the sum $M_i = \sum_{j} c_{ij} \, M_{ij}^T M_{ij}$ of (\ref{eq:membrane_quadratic}): all its eigenvalues are real and non-negative. Its trace, used in Section~\ref{section:pcg}, is $\mathrm{tr} \, M_{ij}^T M_{ij} = 2 \|a_{ij}\|^2 + 2 \|b_{ij}\|^2 = 4 (\|p_{ij}\|^2 + \|q_{ij}\|^2)$, since $\mathrm{tr}(-[b]_\times^2) = 2 \|b\|^2$.
 
 
  \subsection{Efficient Computation of $M_i$}
 
-Since $\left[ s \right]^2_\times = s \, s^T - \| s \|^2 I$, the product $M_{ij}^T M_{ij}$ has the simple form
+Since $\left[ b \right]^2_\times = b \, b^T - \| b \|^2 I$, the product $M_{ij}^T M_{ij}$ has the simple form
 \begin{equation*}
 	M_{ij}^T M_{ij} =
 	\left[\begin{array}{cc}
-		\| d_{ij} \|^2        &         (s_{ij} \times d_{ij})^T \\
-		s_{ij} \times d_{ij}  &    d_{ij} d_{ij}^T - s_{ij} s_{ij}^T + \| s_{ij} \|^2 I_{3\times3} \\
+		\| a_{ij} \|^2        &         (b_{ij} \times a_{ij})^T \\
+		b_{ij} \times a_{ij}  &    a_{ij} a_{ij}^T - b_{ij} b_{ij}^T + \| b_{ij} \|^2 I_{3\times3} \\
 	\end{array}\right].
 \end{equation*}
-Writing it in terms of $q_{ij}$ and $p_{ij}$, with $\|d_{ij}\|^2 = \|q_{ij}\|^2 + \|p_{ij}\|^2 - 2 \, q_{ij}^T p_{ij}$, $s_{ij} \times d_{ij} = -2 \, q_{ij} \times p_{ij}$ and $d_{ij} d_{ij}^T - s_{ij} s_{ij}^T = -2 \, (q_{ij} p_{ij}^T + p_{ij} q_{ij}^T)$, gives
+Writing it in terms of $q_{ij}$ and $p_{ij}$, with $\|a_{ij}\|^2 = \|q_{ij}\|^2 + \|p_{ij}\|^2 - 2 \, q_{ij}^T p_{ij}$, $\|b_{ij}\|^2 = \|q_{ij}\|^2 + \|p_{ij}\|^2 + 2 \, q_{ij}^T p_{ij}$, $b_{ij} \times a_{ij} = -2 \, q_{ij} \times p_{ij}$ and $a_{ij} a_{ij}^T - b_{ij} b_{ij}^T = -2 \, (q_{ij} p_{ij}^T + p_{ij} q_{ij}^T)$, gives
 \begin{equation}
    \label{eqn:matrix_fast}
    \begin{aligned}
@@ -498,7 +546,7 @@ Writing it in terms of $q_{ij}$ and $p_{ij}$, with $\|d_{ij}\|^2 = \|q_{ij}\|^2 
     & + (\| p_{ij} \|^2 + \| q_{ij} \|^2) \, I_{4\times4}.
    \end{aligned}
 \end{equation}
-All terms of (\ref{eqn:matrix_fast}) can be derived from the dyadic tensor $q_{ij} p_{ij}^T$ and the scalar $\|p_{ij}\|^2 + \|q_{ij}\|^2$. Summing over the cell, $M_i$ is obtained from the single $3 \times 3$ matrix $S_i = \sum_j c_{ij} \, q_{ij} p_{ij}^T$ and the scalar $\sigma_i = \sum_j c_{ij} (\|p_{ij}\|^2 + \|q_{ij}\|^2)$: the trace of $S_i$ gives $\sum_j c_{ij} \, q_{ij}^T p_{ij}$, its antisymmetric part gives $\sum_j c_{ij} \, q_{ij} \times p_{ij}$, and $S_i + S_i^T$ gives $\sum_j c_{ij} (q_{ij} p_{ij}^T + p_{ij} q_{ij}^T)$. Computing $M_i$ therefore costs one $3 \times 3$ outer-product accumulation per edge.
+All terms of (\ref{eqn:matrix_fast}) can be derived from the dyadic tensor $q_{ij} p_{ij}^T$ and the scalar $\|p_{ij}\|^2 + \|q_{ij}\|^2$. Summing over the cell, $M_i$ is obtained from the single $3 \times 3$ matrix $T_i = \sum_j c_{ij} \, q_{ij} p_{ij}^T$ and the scalar $\sigma_i = \sum_j c_{ij} (\|p_{ij}\|^2 + \|q_{ij}\|^2)$: the trace of $T_i$ gives $\sum_j c_{ij} \, q_{ij}^T p_{ij}$, its antisymmetric part gives $\sum_j c_{ij} \, q_{ij} \times p_{ij}$, and $T_i + T_i^T$ gives $\sum_j c_{ij} (q_{ij} p_{ij}^T + p_{ij} q_{ij}^T)$. Computing $M_i$ therefore costs one $3 \times 3$ outer-product accumulation per edge.
 
 \section{Implementation}
 \label{section:implementation}
