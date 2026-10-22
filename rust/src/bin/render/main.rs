@@ -1,7 +1,7 @@
 //! Renders the paper's figures from real deformations computed by the solver, into
 //! `../fast-linealized-rotation/figures/`. Opens a small window for the OpenGL context and closes it when done.
 //!
-//! `cargo run --release --bin render [all|teaser|pipeline|bar|cactus|colorbar]`
+//! `cargo run --release --bin render [all|teaser|pipeline|bar|cactus|colorbar|dance [name|all]]`
 
 use std::fs::{self, File};
 use std::io::BufWriter;
@@ -13,6 +13,8 @@ use arap::mesh::{Mesh, Vec3 as DVec3};
 use arap::scenes::{arc, armadillo_handles, armadillo_pose, load, tube_length, tube_scene, twist};
 use nalgebra::{UnitQuaternion, Vector3};
 use three_d::*;
+
+mod dance;
 
 /// Output size in pixels, and the supersampling factor used for anti-aliasing.
 const WIDTH: u32 = 1200;
@@ -44,6 +46,8 @@ struct View {
     fov: f32,
     width: u32,
     height: u32,
+    /// Floor height; under the lowest point when absent.
+    floor_y: Option<f64>,
 }
 
 impl View {
@@ -62,6 +66,7 @@ impl View {
             fov: 30.0,
             width: WIDTH,
             height: HEIGHT,
+            floor_y: None,
         }
     }
 
@@ -119,12 +124,18 @@ fn f32v(p: &DVec3) -> Vec3 {
     vec3(p.x as f32, p.y as f32, p.z as f32)
 }
 
-/// Renders `view` offscreen with soft key-light shadows on a floor and saves it as a PNG.
+/// Renders `view` offscreen with soft key-light shadows on a floor and saves it as a PNG in the figures directory.
 fn render(context: &Context, view: &View, name: &str) {
+    let path = figures_dir().join(format!("{name}.png"));
+    render_to(context, view, &path, SUPERSAMPLE);
+    println!("wrote {}", path.display());
+}
+
+fn render_to(context: &Context, view: &View, path: &Path, supersample: u32) {
     let turn = |p: &DVec3| view.turn * p;
     let positions: Vec<DVec3> = view.positions.iter().map(turn).collect();
     let normals: Vec<DVec3> = view.normals.iter().map(turn).collect();
-    let (w, h) = (view.width * SUPERSAMPLE, view.height * SUPERSAMPLE);
+    let (w, h) = (view.width * supersample, view.height * supersample);
     let camera = Camera::new_perspective(
         Viewport::new_at_origo(w, h),
         view.eye,
@@ -153,7 +164,7 @@ fn render(context: &Context, view: &View, name: &str) {
     );
 
     // A floor under the lowest point, large enough to catch the shadow.
-    let floor_y = positions.iter().map(|p| p.y).fold(f64::MAX, f64::min) as f32 - 0.002;
+    let floor_y = view.floor_y.unwrap_or_else(|| positions.iter().map(|p| p.y).fold(f64::MAX, f64::min)) as f32 - 0.002;
     let mut floor = Gm::new(
         three_d::Mesh::new(context, &CpuMesh::square()),
         PhysicalMaterial::new_opaque(
@@ -191,7 +202,7 @@ fn render(context: &Context, view: &View, name: &str) {
 
     let wire = view.wire.as_ref().map(|(positions, faces)| {
         let soup: Vec<Vec3> = faces.iter().flatten().map(|&i| f32v(&turn(&positions[i]))).collect();
-        Wireframe::new(context, &soup, 1.6 * SUPERSAMPLE as f32, Srgba::new(40, 60, 110, 255))
+        Wireframe::new(context, &soup, 1.6 * supersample as f32, Srgba::new(40, 60, 110, 255))
     });
 
     // Key light from the upper left front casts the shadow; a weak fill from the right and an ambient term.
@@ -221,7 +232,7 @@ fn render(context: &Context, view: &View, name: &str) {
     let floor_only = target.read_color::<[u8; 4]>();
     let column = w / 2;
     let horizon = (0..h).find(|&y| floor_only[(y * w + column) as usize][..3] != [255, 255, 255]).unwrap_or(h - 1);
-    let floor_pixel = floor_only[((horizon + 8 * SUPERSAMPLE).min(h - 1) * w + column) as usize];
+    let floor_pixel = floor_only[((horizon + 8 * supersample).min(h - 1) * w + column) as usize];
     let [r, g, b, _] = floor_pixel.map(|c| c as f32 / 255.0);
     target.clear(ClearState::color_and_depth(r, g, b, 1.0, 1.0));
     target.render(&camera, floor.into_iter().chain(&model), &lights);
@@ -230,7 +241,7 @@ fn render(context: &Context, view: &View, name: &str) {
     }
     target.render(&camera, handles.iter().flat_map(|s| s.into_iter()), &lights);
     let pixels = target.read_color::<[u8; 4]>();
-    save_png(&figures_dir().join(format!("{name}.png")), &pixels, w, h, SUPERSAMPLE);
+    save_png(path, &pixels, w, h, supersample);
 }
 
 /// Box-filters `factor` x `factor` blocks (anti-aliasing) and writes an RGB PNG. `pixels` are in top-down rows,
@@ -258,7 +269,6 @@ fn save_png(path: &Path, pixels: &[[u8; 4]], w: u32, h: u32, factor: u32) {
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header().unwrap().write_image_data(&out).unwrap();
-    println!("wrote {}", path.display());
 }
 
 /// The viridis colour map, interpolated between 11 anchors.
@@ -536,7 +546,9 @@ fn colorbar() {
             pixels.push([c.r, c.g, c.b, 255]);
         }
     }
-    save_png(&figures_dir().join("colorbar.png"), &pixels, w, h, 1);
+    let path = figures_dir().join("colorbar.png");
+    save_png(&path, &pixels, w, h, 1);
+    println!("wrote {}", path.display());
 }
 
 fn main() {
@@ -574,6 +586,9 @@ fn main() {
         }
         if which == "twist_sweep" {
             twist_sweep(&context);
+        }
+        if which == "dance" {
+            dance::dance(&context, std::env::args().nth(2).as_deref().unwrap_or("all"));
         }
         if which == "all" || which == "cactus" {
             cactus(&context);
