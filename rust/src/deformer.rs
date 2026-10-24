@@ -96,6 +96,11 @@ pub enum ConstrainedRule {
     Adaptive { threshold_deg: u32 },
 }
 
+impl ConstrainedRule {
+    /// The rule of the paper: the cell equation, except in the hard case beyond 90 degrees.
+    pub const DEFAULT: ConstrainedRule = ConstrainedRule::Adaptive { threshold_deg: 90 };
+}
+
 /// Bending weight of the SR-ARAP baseline. Its bending term `||R_i - R_j||_F^2` is about `2 theta^2` for two
 /// rotations `theta` apart, while the quaternion term `||q_i - q_j||^2` is about `theta^2 / 4`; dividing the
 /// paper's `alpha` by 8 gives both methods the same stiffness for small rotation differences.
@@ -181,7 +186,7 @@ impl Deformer {
             low_solver,
             high_solver,
             local_step: LocalStep::Pcg,
-            constrained_rule: ConstrainedRule::Smoothed,
+            constrained_rule: ConstrainedRule::DEFAULT,
             feedback: FEEDBACK,
             rotation_symbolic: None,
             rotation_llt_symbolic: None,
@@ -224,7 +229,7 @@ impl Deformer {
             low_solver,
             high_solver: None,
             local_step: LocalStep::Pcg,
-            constrained_rule: ConstrainedRule::Smoothed,
+            constrained_rule: ConstrainedRule::DEFAULT,
             feedback: FEEDBACK,
             rotation_symbolic: None,
             rotation_llt_symbolic: None,
@@ -740,6 +745,25 @@ impl Deformer {
                 let e = matrices[i].symmetric_eigen();
                 let v1 = e.eigenvectors.column(e.eigenvalues.imin()).into_owned();
                 2.0 * (v1.dot(&h).abs() / h.norm()).min(1.0).acos().to_degrees()
+            })
+            .collect()
+    }
+
+    /// For every constrained cell at the current state: the pull angle (degrees) between its own fit and its
+    /// neighbours' mean rotation, and the stiffness ratios `(m1 + alpha A) / (m2 + alpha A)` and
+    /// `(m1 + alpha A) / (m4 + alpha A)` of Proposition `prop:lag` (in the units of the implementation, which halves
+    /// both `M_i` and `alpha A`, so the ratios are unchanged).
+    pub fn handle_cell_statistics(&self) -> Vec<(f64, f64, f64)> {
+        let alpha_area = ALPHA * self.mesh_area;
+        let matrices = self.cell_matrices();
+        let pulls = self.pull_angles(true);
+        (0..self.low.num_vertices())
+            .filter(|&i| self.low_constrained[i])
+            .zip(pulls)
+            .map(|(i, pull)| {
+                let mut m = matrices[i].symmetric_eigen().eigenvalues.as_slice().to_vec();
+                m.sort_by(f64::total_cmp);
+                (pull, (m[0] + alpha_area) / (m[1] + alpha_area), (m[0] + alpha_area) / (m[3] + alpha_area))
             })
             .collect()
     }

@@ -842,6 +842,44 @@ Eigen::Quaterniond E3GA_Fast4(const vector<Eigen::Vector3d>& P, const vector<Eig
 }
 
 // The rotation system as originally built: identity rows at the constrained vertices, solved with a sparse LU.
+/*
+	Rotation of a constrained (handle) cell. Normally the cell equation without feedback (E3GA_Fast4): the fit of the
+	cell's edges, smoothed towards its neighbours' rotations. In the hard case, when the cell's own fit v1 (the
+	eigenvector of the smallest eigenvalue of Mi) and the neighbours' pull h disagree by more than 90 degrees as
+	rotations, 2 acos(|v1.h| / |h|) > 90 degrees, the smoothing would hold the handle back (a handle turned by 180
+	degrees has a quaternion orthogonal to its resting neighbours'), so the cell takes its own fit instead, on the side
+	of its handle's rotation. Once the rotations have spread the test fails again, so the fixed point is unchanged.
+*/
+Eigen::Quaterniond ConstrainedRotation(const vector<Eigen::Vector3d>& P, const vector<Eigen::Vector3d>& Q, const vector<double>& w, double alphaA, const vector<Eigen::Quaterniond>& Rq, const int N, const Eigen::Quaterniond& side)
+{
+	Eigen::Vector4d h = Eigen::Vector4d::Zero();
+	for (int i = 0; i < N; ++i) h += Eigen::Vector4d(Rq[i].w(), Rq[i].x(), Rq[i].y(), Rq[i].z());
+	Eigen::Matrix4d JtJ;
+	E3GA_Prep(P, Q, w, N, JtJ);
+	Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> eigen(JtJ);
+	Eigen::Vector4d v1 = eigen.eigenvectors().col(0); // eigenvalues in increasing order
+	const double pull = 2.0 * std::acos(std::min(1.0, std::abs(v1.dot(h)) / h.norm()));
+	if (pull <= 0.5 * M_PI)
+		return E3GA_Fast4(P, Q, w, alphaA, Rq, N);
+	if (v1.dot(Eigen::Vector4d(side.w(), side.x(), side.y(), side.z())) < 0.0) v1 = -v1;
+	return Eigen::Quaterniond(v1(0), v1(1), v1(2), v1(3)).normalized();
+}
+
+/* The rotation of the handle that drives a constrained vertex, kept on one branch from call to call. */
+Eigen::Quaterniond HandleRotationOf(int vertex)
+{
+	static std::vector<Eigen::Quaterniond> last;
+	if (last.size() != handles.size()) last.assign(handles.size(), Eigen::Quaterniond::Identity());
+	for (size_t k = 0; k < handles.size(); ++k) {
+		if (!handles[k].constraints.count(vertex)) continue;
+		Eigen::Quaterniond q(MotorToMatrix(handles[k].GetTRVersor()).linear());
+		if (q.coeffs().dot(last[k].coeffs()) < 0.0) q.coeffs() *= -1.0;
+		last[k] = q;
+		return q;
+	}
+	return Eigen::Quaterniond::Identity();
+}
+
 void SolveRotationsSystemLU(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, std::set<int>& constraints, bool analyzeSystem)
 {
 	vector<Eigen::Vector3d> P;
@@ -927,7 +965,7 @@ void SolveRotationsSystemLU(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexB
         Rq[v] = vertexDescriptors.rotors[neighbors[v]];
       }
 
-      Eigen::Quaterniond M = E3GA_Fast4(P, Q, w, alphaA, Rq, vertexDegree);
+      Eigen::Quaterniond M = ConstrainedRotation(P, Q, w, alphaA, Rq, vertexDegree, HandleRotationOf(i));
       Rknown[ii+0] = M.w();
       Rknown[ii+1] = M.x();
       Rknown[ii+2] = M.y();
@@ -1078,7 +1116,7 @@ void SolveRotationsSystemLDLT(Mesh *mesh, std::shared_ptr<SparseMatrix> A, Verte
 		if (!is_constrained(constraints, vertex.ID)) continue;
 		const int degree = gather(vertex);
 		for (int v = 0; v < degree; ++v) Rq[v] = vertexDescriptors.rotors[neighbors[v]];
-		fixed[vertex.ID] = coefficients(E3GA_Fast4(P, Q, w, alphaA, Rq, degree));
+		fixed[vertex.ID] = coefficients(ConstrainedRotation(P, Q, w, alphaA, Rq, degree, HandleRotationOf(vertex.ID)));
 	}
 
 	// Free vertices: scaled diagonal block, -I towards free neighbours (lower triangle only), constrained

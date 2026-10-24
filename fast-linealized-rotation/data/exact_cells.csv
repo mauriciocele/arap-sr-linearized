@@ -1,5 +1,5 @@
 scene,cells,state,count,multiplier_gap_median,multiplier_gap_max,angle_median_deg,angle_99_deg,angle_max_deg,pull_max_deg,secular_steps_mean,eigen_steps_mean
-bar_twist180,free,mid,6048,4.580e-8,4.566e-3,0.000e0,1.389e-3,1.389e-3,179.99,2.25,3.68
+bar_twist180,free,mid,6048,6.943e-7,5.636e-3,0.000e0,8.972e-4,8.972e-4,37.07,2.30,3.81
 bar_twist180,constrained,first,1898,3.502e-3,1.480e-2,0.000e0,8.848e-4,8.848e-4,180.00,1.92,1.30
-bar_arc90,free,mid,6048,2.407e-4,1.565e-3,2.341e-5,2.740e-4,4.550e-4,84.06,3.00,4.74
+bar_arc90,free,mid,6048,1.948e-4,1.390e-3,1.673e-5,2.019e-4,3.724e-4,41.89,3.00,4.71
 armadillo,free,mid,316,5.106e-5,3.030e-2,2.415e-6,1.092e-1,1.532e-1,37.80,2.44,3.81
