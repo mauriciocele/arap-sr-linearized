@@ -7,7 +7,7 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
-use arap::deformer::{Deformer, LocalStep};
+use arap::deformer::{ConstrainedRule, Deformer, LocalStep};
 use arap::handle::Handle;
 use arap::mesh::{Mesh, Vec3 as DVec3};
 use arap::scenes::{arc, armadillo_handles, armadillo_pose, load, tube_length, tube_scene, twist};
@@ -551,6 +551,30 @@ fn colorbar() {
     println!("wrote {}", path.display());
 }
 
+/// The 180-degree twist, and the twist following a 180-degree arc, after a few hundred iterations with the
+/// paper's rule for the constrained cells and with the adaptive rule (own fit in the hard case).
+fn adaptive(context: &Context) {
+    for (scene, iterations) in [("twist180", 100), ("arc180_twist180", 300)] {
+        for (name, rule) in [("smoothed", ConstrainedRule::Smoothed), ("adaptive", ConstrainedRule::Adaptive { threshold_deg: 90 })] {
+            let (mesh, handles) = tube_scene(81, 96);
+            let length = tube_length(&mesh);
+            let colors = stripes(&mesh);
+            let mut d = Deformer::control_only(mesh, handles);
+            if scene == "arc180_twist180" {
+                arc(&mut d.handles[1], length, 180.0);
+            }
+            d.handles[1].rotation *= rot(Vector3::y(), 180.0);
+            d.local_step = LocalStep::Pcg;
+            d.constrained_rule = rule;
+            converge(&mut d, iterations);
+            let (width, height) = if scene == "twist180" { (800, 1200) } else { (1000, 1000) };
+            let mut v = View::detail(&d).with_handles(&d).sized(width, height);
+            v.colors = Some(colors);
+            render(context, &v.framed([0.35, 0.3, -1.0]), &format!("{scene}_{iterations}_{name}"));
+        }
+    }
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "all".to_string());
     let window = Window::new(WindowSettings {
@@ -586,6 +610,9 @@ fn main() {
         }
         if which == "twist_sweep" {
             twist_sweep(&context);
+        }
+        if which == "adaptive" {
+            adaptive(&context);
         }
         if which == "dance" {
             dance::dance(&context, std::env::args().nth(2).as_deref().unwrap_or("all"));

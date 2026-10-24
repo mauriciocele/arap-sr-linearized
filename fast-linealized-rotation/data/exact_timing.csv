@@ -1,0 +1,13 @@
+scene,method,local_ms
+bar_twist180,closed,14.5333
+bar_twist180,exact3,7.6616
+bar_twist180,adaptive,15.0362
+bar_arc180_twist180,closed,14.5067
+bar_arc180_twist180,exact3,8.8471
+bar_arc180_twist180,adaptive,15.0573
+bar_arc90,closed,13.8066
+bar_arc90,exact3,7.3551
+bar_arc90,adaptive,14.3287
+armadillo,closed,0.8409
+armadillo,exact3,0.4681
+armadillo,adaptive,0.8753

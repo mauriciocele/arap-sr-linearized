@@ -49,8 +49,19 @@ Paper data and figures:
 
 ```sh
 cargo run --release --bin experiments [all|convergence|feedback|iterative|bias|energy|comparison|timing]
-cargo run --release --bin render [all|teaser|pipeline|bar|arcs|cactus|colorbar|twist270]
+cargo run --release --bin render [all|teaser|pipeline|bar|arcs|cactus|colorbar|twist270|adaptive]
+cargo run --release --bin experiments exact           # exact cells on the unit sphere, adaptive rule for handle cells
+cargo run --release --example exact_vs_linearized     # per-cell multiplier gap, local-step times, shapes
+cargo run --release --example twist_convergence 180   # the 180-degree twist with the linearized and the exact step
+cargo run --release --example ownfit_warmstart        # the adaptive rule for handle cells on four scenes
+cargo run --release --example adaptive_threshold      # its sensitivity to the threshold
 ```
+
+`src/exact.rs` solves one cell on the unit sphere exactly (Lagrange multiplier from the secular equation,
+Newton's method with a monotone start). `LocalStep::Exact { sweeps }` uses it in Gauss-Seidel sweeps, and
+`Deformer::constrained_rule` chooses how handle cells get their rotations: `Smoothed` (the paper's equation),
+`Exact`, `OwnFit`, or `Adaptive { threshold_deg }` (own fit only when it disagrees with the neighbours' pull by
+more than the threshold, which removes the slow start of large twists without changing the result).
 
 `experiments` writes CSV files to `fast-linealized-rotation/data/`, and `render` writes images to
 `fast-linealized-rotation/figures/` (it opens a small window for the OpenGL context).

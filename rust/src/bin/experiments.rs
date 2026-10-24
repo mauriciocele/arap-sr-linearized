@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 
 use std::time::Instant;
 
-use arap::deformer::{Deformer, LocalStep};
+use arap::deformer::{ConstrainedRule, Deformer, LocalStep};
 use arap::handle::Handle;
 use arap::mesh::{Mesh, Vec3};
-use arap::scenes::{arc, armadillo_handles, armadillo_pose, bend, load, models, raise_arms, tube_length, tube_scene};
+use arap::scenes::{twist, arc, armadillo_handles, armadillo_pose, bend, load, models, raise_arms, tube_length, tube_scene};
 
 fn data_dir() -> PathBuf {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fast-linealized-rotation/data");
@@ -396,6 +396,139 @@ fn timing() {
     write("timing.csv", &csv);
 }
 
+/// The exact cell on the unit sphere against the linearized one (multiplier frozen at -alpha A):
+/// - `exact_cells.csv`: how far the exact multiplier and rotation are from the linearized ones, for free cells at
+///   a mid-solve state and for the constrained cells of the twisted bar right after the handle turns;
+/// - `exact_convergence.csv`: energy and shape measures per iteration on the twisted bar, the 90-degree arc and the
+///   Armadillo, for the closed form (PCG), the closed form with exact constrained cells, relaxation and exact sweeps;
+/// - `exact_profile.csv`: the twist angle by height on the twisted bar after 100 and 300 iterations;
+/// - `exact_timing.csv`: the local-step time of each method at the end of the run.
+fn exact() {
+    let scenes = ["bar_twist180", "bar_arc180_twist180", "bar_arc90", "armadillo"];
+    let make = |scene: &str| -> Deformer {
+        match scene {
+            "armadillo" => {
+                let mut d = Deformer::new(load("armadillo.obj"), load("armadillo1.obj"), armadillo_handles());
+                armadillo_pose(&mut d, 2);
+                d
+            }
+            _ => {
+                let (mesh, handles) = tube_scene(81, 96);
+                let length = tube_length(&mesh);
+                let mut d = Deformer::control_only(mesh, handles);
+                match scene {
+                    "bar_arc90" => arc(&mut d.handles[1], length, 90.0),
+                    "bar_arc180_twist180" => {
+                        arc(&mut d.handles[1], length, 180.0);
+                        d.handles[1].rotation *=
+                            nalgebra::UnitQuaternion::from_axis_angle(&nalgebra::Vector3::y_axis(), std::f64::consts::PI);
+                    }
+                    _ => twist(&mut d.handles[1], 180.0),
+                }
+                d
+            }
+        }
+    };
+    let percentile = |v: &[f64], p: f64| {
+        let mut v = v.to_vec();
+        v.sort_by(f64::total_cmp);
+        v[((v.len() - 1) as f64 * p).round() as usize]
+    };
+    // per-cell statistics
+    let mut cells = String::from("scene,cells,state,count,multiplier_gap_median,multiplier_gap_max,angle_median_deg,angle_99_deg,angle_max_deg,pull_max_deg,secular_steps_mean,eigen_steps_mean\n");
+    for scene in scenes {
+        for (state, iterations, constrained) in [("mid", 5, false), ("first", 0, true)] {
+            if constrained && scene != "bar_twist180" || scene == "bar_arc180_twist180" {
+                continue;
+            }
+            let mut d = make(scene);
+            d.local_step = LocalStep::Pcg;
+            for _ in 0..iterations {
+                d.iterate();
+            }
+            if iterations == 0 {
+                // the state of the first local step: the handles moved, the rotations still at rest
+                d.global();
+            }
+            let stats = d.exact_cell_statistics(constrained);
+            let pulls = d.pull_angles(constrained);
+            let gap: Vec<f64> = stats.iter().map(|c| (c.0 - c.1).abs() / -c.1).collect();
+            let angle: Vec<f64> = stats.iter().map(|c| c.5.to_degrees()).collect();
+            let sec = stats.iter().map(|c| c.4 as f64).sum::<f64>() / stats.len() as f64;
+            let eig = stats.iter().map(|c| c.3 as f64).sum::<f64>() / stats.len() as f64;
+            writeln!(cells, "{scene},{},{state},{},{:.3e},{:.3e},{:.3e},{:.3e},{:.3e},{:.2},{sec:.2},{eig:.2}",
+                if constrained { "constrained" } else { "free" }, stats.len(),
+                percentile(&gap, 0.5), percentile(&gap, 1.0), percentile(&angle, 0.5), percentile(&angle, 0.99),
+                percentile(&angle, 1.0), percentile(&pulls, 1.0)).unwrap();
+        }
+    }
+    write("exact_cells.csv", &cells);
+    // convergence, profiles and timing
+    let methods = [
+        ("closed", LocalStep::Pcg, ConstrainedRule::Smoothed),
+        ("exact3", LocalStep::Exact { sweeps: 3 }, ConstrainedRule::Exact),
+        ("adaptive", LocalStep::Pcg, ConstrainedRule::Adaptive { threshold_deg: 90 }),
+    ];
+    let mut conv = String::from("scene,method,iteration,elapsed_ms,energy,distortion,roughness_deg\n");
+    let mut profile = String::from("method,iteration,height,twist_deg\n");
+    let mut timing = String::from("scene,method,local_ms\n");
+    for scene in scenes {
+        let iterations = if scene == "armadillo" { 300 } else { 3000 };
+        for (label, step, rule) in methods {
+            let mut d = make(scene);
+            d.local_step = step;
+            d.constrained_rule = rule;
+            let mut elapsed = 0.0;
+            for k in 1..=iterations {
+                let t = Instant::now();
+                d.iterate();
+                elapsed += t.elapsed().as_secs_f64() * 1e3;
+                if k <= 20 || k % 10 == 0 {
+                    let (distortion, roughness) = d.shape_metrics();
+                    writeln!(conv, "{scene},{label},{k},{elapsed:.3},{:.8e},{distortion:.8e},{roughness:.6}", d.energy()).unwrap();
+                }
+                if scene == "bar_twist180" && (k == 100 || k == 300 || k == iterations) && label != "exact3" {
+                    let ys: Vec<f64> = d.low.positions.iter().map(|p| p.y).collect();
+                    let (lo, hi) = ys.iter().fold((f64::MAX, f64::MIN), |(a, b), &y| (a.min(y), b.max(y)));
+                    for b in 0..20 {
+                        let (mut sum, mut count) = (0.0, 0.0);
+                        for (i, &y) in ys.iter().enumerate() {
+                            let t = (y - lo) / (hi - lo);
+                            if ((t * 20.0) as usize).min(19) == b {
+                                // signed angle about the bar's axis y
+                                let r = d.low_rotations()[i];
+                                let angle = 2.0 * r.j.atan2(r.w);
+                                sum += angle.to_degrees();
+                                count += 1.0;
+                            }
+                        }
+                        writeln!(profile, "{label},{k},{:.3},{:.3}", (b as f64 + 0.5) / 20.0, sum / count).unwrap();
+                    }
+                }
+            }
+            let start = d.low_rotations().to_vec();
+            let reps = if scene == "armadillo" { 200 } else { 20 };
+            let mut best = f64::MAX;
+            for _ in 0..3 {
+                let mut total = 0.0;
+                for _ in 0..reps {
+                    d.set_low_rotations(&start);
+                    let t = Instant::now();
+                    d.local();
+                    total += t.elapsed().as_secs_f64();
+                }
+                best = best.min(total * 1e3 / reps as f64);
+            }
+            writeln!(timing, "{scene},{label},{best:.4}").unwrap();
+            let (distortion, roughness) = d.shape_metrics();
+            println!("{scene} {label}: energy {:.6}, distortion {distortion:.4e}, roughness {roughness:.3}, local {best:.3} ms, total {elapsed:.0} ms", d.energy());
+        }
+    }
+    write("exact_convergence.csv", &conv);
+    write("exact_profile.csv", &profile);
+    write("exact_timing.csv", &timing);
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "all".to_string());
     if which == "all" || which == "convergence" {
@@ -418,5 +551,8 @@ fn main() {
     }
     if which == "all" || which == "timing" {
         timing();
+    }
+    if which == "all" || which == "exact" {
+        exact();
     }
 }

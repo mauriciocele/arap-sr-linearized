@@ -97,7 +97,7 @@
 
 \begin{abstract}
 
-As-Rigid-As-Possible deformation with Smooth Rotations (SR-ARAP \cite{Levi2015}) has recently gained popularity in applications that need an isometric surface mapping, because the quality of its results is comparable to that of more costly volumetric techniques operating on tetrahedral meshes. SR-ARAP minimizes a non-linear least-squares energy with a local/global optimization. Its local step estimates the rotation of each surface cell together with the rotations of its neighbors, so the rotations are codependent across the whole surface. The local step is currently solved by relaxation, and since only a few relaxation iterations can be afforded per step, the rotations it produces are approximate. We show that, with linearized quaternion rotations, the local step can be solved exactly. After a diagonal scaling it becomes a single sparse, symmetric positive definite linear system, which we prove to be the exact stationarity condition of a well-defined quadratic energy. A feedback term towards the previous rotations bounds the system's smallest eigenvalue independently of the mesh, which keeps it well conditioned. We prove that preconditioning the system with a Cholesky factorization of its position-independent part, which is factored once per set of constraints, bounds the condition number by a constant that shrinks as the mesh is refined. Conjugate gradients then reach the exact rotations, to $10^{-12}$~rad, in 5 to 20 iterations of linear cost, so the exact local step scales nearly linearly with the mesh and is up to 49 times faster than a direct factorization on large meshes. Compared with the original SR-ARAP local step, the converged shapes have 5--12\% lower ARAP distortion and smoother rotations, and they reach the quality at which SR-ARAP stops 1.4 to 4.6 times sooner. Combined with a multiresolution scheme that transfers the rotations by harmonic interpolation, the method deforms a 173{,}000-vertex model interactively, with the exact local steps taking 2.4~ms of a 29~ms frame.
+As-Rigid-As-Possible deformation with Smooth Rotations (SR-ARAP \cite{Levi2015}) has recently gained popularity in applications that need an isometric surface mapping, because the quality of its results is comparable to that of more costly volumetric techniques operating on tetrahedral meshes. SR-ARAP minimizes a non-linear least-squares energy with a local/global optimization. Its local step estimates the rotation of each surface cell together with the rotations of its neighbors, so the rotations are codependent across the whole surface. The local step is currently solved by relaxation, and since only a few relaxation iterations can be afforded per step, the rotations it produces are approximate. We show that, with linearized quaternion rotations, the local step can be solved exactly. After a diagonal scaling it becomes a single sparse, symmetric positive definite linear system, which we prove to be the exact stationarity condition of a well-defined quadratic energy. A feedback term towards the previous rotations bounds the system's smallest eigenvalue independently of the mesh, which keeps it well conditioned. We prove that preconditioning the system with a Cholesky factorization of its position-independent part, which is factored once per set of constraints, bounds the condition number by a constant that shrinks as the mesh is refined. Conjugate gradients then reach the exact rotations, to $10^{-12}$~rad, in 5 to 20 iterations of linear cost, so the exact local step scales nearly linearly with the mesh and is up to 49 times faster than a direct factorization on large meshes. Compared with the original SR-ARAP local step, the converged shapes have 5--12\% lower ARAP distortion and smoother rotations, and they reach the quality at which SR-ARAP stops 1.4 to 4.6 times sooner. Putting the unit-norm constraint back, one cell at a time, shows what the linearization does: it freezes the Lagrange multiplier of the constraint, and the exact multiplier differs from the frozen one by the cell's distortion and the disagreement of its neighbors, which keeps the linearized rotations within $0.15^\circ$ of the exact ones. The same analysis explains why large twists converge slowly: a handle turned by $180^\circ$ has a rotation orthogonal, as a quaternion, to the rotations of its neighbors, and its cells stay behind; letting them take their own rotation in that case reaches the same shapes five times sooner. Combined with a multiresolution scheme that transfers the rotations by harmonic interpolation, the method deforms a 173{,}000-vertex model interactively, with the exact local steps taking 2.4~ms of a 29~ms frame.
 
 \end{abstract}
 
@@ -122,6 +122,8 @@ As-Rigid-As-Possible deformation with Smooth Rotations (SR-ARAP \cite{Levi2015})
 The current SR-ARAP method has two main disadvantages. The first is the local step, which looks for the best rotation of each surface cell while keeping neighboring rotations similar to each other. It needs to converge globally over the whole mesh. Currently the local step is solved with a relaxation method: the rotation of each cell is optimized while its neighbors' rotations are kept fixed, and the process is repeated until convergence. Although the cost of each relaxation iteration can be reduced considerably by avoiding SVD computations \cite{Ligare2020}, a fixed number of iterations is usually performed in order to bound the solver time. That compromises the quality of the results, since a fixed number of iterations (usually two or three) is not enough to reach optimal rotations across the surface. The second disadvantage is the high computational cost, which increases drastically with the number of vertices: SR-ARAP is a non-linear technique that requires several local/global iterations to converge.
 
 In this paper we address both drawbacks. First, we solve the local step as a single linear system of equations, avoiding the need to solve a series of codependent SVD problems iteratively. We show that, after a diagonal scaling, this system is symmetric positive definite and is the exact stationarity condition of a well-defined quadratic energy (Section~\ref{section:exact_energy}). We bound its condition number and show that a preconditioner built from its position-independent part, factored once per set of constraints, makes conjugate gradients converge in a number of iterations that does not grow with the mesh (Section~\ref{section:pcg}); the exact local step therefore costs nearly linear time, and on the meshes we tested it reaches the quality of the original SR-ARAP sooner. Second, we propose a simple multiresolution method: the non-linear problem is first solved on a simplified surface mesh, and the optimized rotations are then transferred to the full-resolution mesh by harmonic interpolation, reusing the Laplacian matrix of the global step.
+
+We also examine the linearization itself. Putting the constraint $|R_i| = 1$ back for one cell at a time turns the cell problem into the minimization of a quadratic on the unit sphere, whose stationarity condition is the linearized cell equation with its Lagrange multiplier left free (Section~\ref{section:exact_cell}). The linearization amounts to freezing that multiplier, and we show that the frozen value is a lower bound of the true one, with a gap made of the cell's distortion and of the disagreement of its neighbors' rotations; we solve the exact cell with Newton's method on the secular equation, with a start that makes it converge monotonically. The exact cells confirm that the linearization is accurate, and they reveal why large twists converge slowly: when a handle is turned by $180^\circ$, its rotation is orthogonal to those of its neighbors, and the rule that smooths the handle cells keeps them behind. A simple adaptive rule removes that delay without changing the result (Section~\ref{section:hard_case}).
 
 
 \section{Related Work}
@@ -418,6 +420,116 @@ since $0 \leq x^T \mathrm D \, x \leq \mu \|x\|^2$ and $x^T (\mathrm C \otimes I
 \paragraph{What the bounds say.} Both bounds are independent of the resolution of the mesh. Moreover $\mu$ decreases under refinement: $\lambda_{\max}(M_i) \leq \mathrm{tr}\, M_i = 4 \sum_j c_{ij} (\|p_{ij}\|^2 + \|q_{ij}\|^2)$ (Section~\ref{section:the_form_of_arap_matrix}) scales with the squared edge length, while $s_i$ does not depend on the resolution, so for a uniform refinement of a fixed surface with bounded stretching $\mu = O(1/n)$, and the preconditioned condition number tends to 1. We therefore solve (\ref{eqn:local_reduced}) by PCG with preconditioner $\mathrm C \otimes I_4$, warm-started from the previous rotations. By the convergence rate above, the number of iterations needed for a given accuracy is bounded independently of the mesh, and decreases as it is refined.
 
 \paragraph{Cost.} $\mathrm C$ is factored once per constraint set with a sparse Cholesky factorization, like the Poisson systems of Sections~\ref{section:global_step} and~\ref{section:harmonic_interpolation_rotors}. Every PCG iteration then costs one product with $\mathrm K_{\mathcal F \mathcal F}$, which is $O(n)$, and one application of the preconditioner: two triangular solves with four right-hand sides, $O(n \log n)$ for the nested-dissection orderings of surface meshes. A local step therefore costs $O(n \log n)$, instead of the $O(n^{1.5})$ of a numeric factorization. We stop PCG at a relative residual of $10^{-12}$, where its rotations match those of the direct solve to within $10^{-12}$~rad, so the method keeps the exactness of the closed form. Without a preconditioner, conjugate gradients also converges in a mesh-independent number of iterations by the first bound of Proposition~\ref{prop:conditioning}, at $O(n)$ per iteration: a linear-time solver, at the price of more iterations.
+
+\subsection{The linearization seen from the unit sphere}
+\label{section:exact_cell}
+
+In Section~\ref{section:linearization} we dropped the constraint $|R_i| = 1$, solved, and normalized afterwards. The results confirm that this works, but they do not say \emph{why}, nor where it might not. To find out, we now put the constraint back, for one cell at a time, and solve the cell problem exactly on the unit sphere. Comparing the exact cell with the linearized one will show precisely what the linearization changes, how large the change is, and in which situation it is not small.
+
+\paragraph{The cell energy on the sphere.} Take the energy (\ref{eq:cell_energy}) of cell $i$ with its neighbors held fixed, and now require $|R_i| = 1$. On the sphere the bending terms simplify: for unit quaternions,
+\begin{equation*}
+\| R_i - R_j \|^2 = |R_i|^2 + |R_j|^2 - 2 \, R_i \cdot R_j = 2 - 2 \, R_i \cdot R_j ,
+\end{equation*}
+so each of them is a constant minus a term that is \emph{linear} in $R_i$. Collecting the linear terms, and recalling that the weights $w_{ij}$ and $\epsilon_i$ sum to one, the cell energy becomes, up to a constant,
+\begin{equation}
+\label{eq:sphere_energy}
+\begin{gathered}
+E_i(R_i) = R_i^T M_i \, R_i - 2 \, h_i^T R_i ,
+\\
+h_i = \alpha A \, g_i, \qquad g_i = \sum_{j \in N(i)} w_{ij} \, R_j + \epsilon_i \, R^{prev}_i .
+\end{gathered}
+\end{equation}
+The vector $g_i$ is a weighted average of unit quaternions with weights that sum to one: the \emph{mean rotation} of the cell's neighborhood, which is a unit vector only when all the neighbors agree. The vector $h_i$, the \emph{pull} of the neighbors, is that mean scaled by the stiffness $\alpha A$. On the sphere, the cell looks for the rotation that fits its own edges, the quadratic term, and that points along the pull, the linear term.
+
+\paragraph{The stationarity condition.} To minimize (\ref{eq:sphere_energy}) on the sphere we use a Lagrange multiplier $\lambda$ for the constraint $|R_i|^2 = 1$. The gradient of $E_i - \lambda (|R_i|^2 - 1)$ vanishes when
+\begin{equation}
+\label{eq:secular_system}
+(M_i - \lambda I) \, R_i = h_i , \qquad |R_i| = 1 .
+\end{equation}
+Geometrically, $\lambda$ measures the part of the energy gradient that is normal to the sphere: at the solution, $\frac12 \nabla E_i = M_i R_i - h_i = \lambda R_i$ points along $R_i$, so it cannot be lowered by moving on the sphere. Now compare (\ref{eq:secular_system}) with the linearized cell equation (\ref{eqn:local_solution_feedback}), $(M_i + \alpha A \, I) R_i = h_i$. They are the same equation, with the multiplier \emph{frozen} at $\lambda = -\alpha A$. This is what the linearization does, and all it does: instead of choosing $\lambda$ so that the solution has unit length, it uses a fixed value and normalizes afterwards.
+
+\paragraph{How far is the frozen value from the true one?} Multiplying (\ref{eq:secular_system}) by $R_i^T$ and using $|R_i| = 1$ gives the multiplier of a solution $R^*_i$ explicitly, $\lambda^* = R_i^{*T} M_i R^*_i - h_i \cdot R^*_i$. The two terms can be read off the mesh:
+\begin{prop}
+\label{prop:multiplier}
+The multiplier of a solution of (\ref{eq:secular_system}) satisfies
+\begin{equation}
+\label{eq:multiplier_gap}
+\begin{aligned}
+\lambda^* + \alpha A = {} & R_i^{*T} M_i \, R^*_i + \frac{\alpha A}{2} \, |g_i - R^*_i|^2 \\
+& + \frac{\alpha A}{2} \Big( \sum_{j \in N(i)} w_{ij} \, |R_j - g_i|^2 + \epsilon_i \, |R^{prev}_i - g_i|^2 \Big),
+\end{aligned}
+\end{equation}
+a sum of three non-negative terms. In particular $\lambda^* \geq -\alpha A$: the frozen multiplier is a lower bound of the true one.
+\end{prop}
+\begin{proof}
+From $\lambda^* = R_i^{*T} M_i R^*_i - \alpha A \, g_i \cdot R^*_i$ we get $\lambda^* + \alpha A = R_i^{*T} M_i R^*_i + \alpha A \, (1 - g_i \cdot R^*_i)$. Since $|R^*_i| = 1$, $1 - g_i \cdot R^*_i = \frac12 |g_i - R^*_i|^2 + \frac12 (1 - |g_i|^2)$. Finally, for unit vectors $X_k$ averaged with weights $\omega_k \geq 0$ that sum to one, $\sum_k \omega_k |X_k - g|^2 = \sum_k \omega_k |X_k|^2 - |g|^2 = 1 - |g|^2$, where $g = \sum_k \omega_k X_k$; applied to the neighbors and the previous rotation, this is the last term.
+\end{proof}
+
+Each term has a plain meaning. The first is the membrane energy of the cell at its rotation: its ARAP distortion, which is zero for a cell that moves rigidly and small for one that deforms little. The second is the distance between the cell's rotation and the mean rotation of its neighborhood. The third is the spread of the neighborhood's rotations around their mean, its variance. In a smooth, nearly rigid deformation all three are small compared with $\alpha A$, so the true multiplier is close to the frozen one, and the linearized cell is close to the exact one. The proposition also says when they differ: where cells deform strongly, or where neighboring rotations disagree.
+
+\paragraph{Which solution is the minimizer?} The system (\ref{eq:secular_system}) can have several solutions, with different multipliers, as the eigenvector equation does when $h_i = 0$. The following classical result \cite{Gander1989, MoreSorensen1983} picks the right one. Let $m_1 \leq m_2 \leq m_3 \leq m_4$ be the eigenvalues of $M_i$ and $v_1, \dots, v_4$ its unit eigenvectors.
+\begin{prop}
+\label{prop:sphere_minimum}
+A solution $(R^*_i, \lambda^*)$ of (\ref{eq:secular_system}) with $\lambda^* \leq m_1$ is a global minimizer of (\ref{eq:sphere_energy}) on the unit sphere.
+\end{prop}
+\begin{proof}
+For any unit quaternion $S$, write $G = M_i - \lambda^* I$, which is positive semi-definite since $\lambda^* \leq m_1$. Using $h_i = G R^*_i$ and $|S| = |R^*_i| = 1$,
+\begin{align*}
+E_i(S) - E_i(R^*_i) &= \big( S^T G S + \lambda^* - 2 R_i^{*T} G S \big) - \big( R_i^{*T} G R^*_i + \lambda^* - 2 R_i^{*T} G R^*_i \big) \\
+&= (S - R^*_i)^T G \, (S - R^*_i) \geq 0 .
+\end{align*}
+Here we used $S^T M_i S = S^T G S + \lambda^* |S|^2$ and $h_i^T S = R_i^{*T} G S$.
+\end{proof}
+So we look for the multiplier below the smallest eigenvalue of $M_i$. Note that $m_1$ has a meaning of its own: its eigenvector $v_1$ is the rotation that fits the cell's edges best, the ARAP rotation of the cell alone, and $m_1$ is its residual.
+
+\paragraph{The secular equation.} For $\lambda < m_1$ the matrix $M_i - \lambda I$ is positive definite, and (\ref{eq:secular_system}) has the unique solution $R(\lambda) = (M_i - \lambda I)^{-1} h_i$. Only its length depends on the choice of $\lambda$: writing $c_k = v_k \cdot h_i$ for the components of the pull in the eigenbasis,
+\begin{equation*}
+|R(\lambda)|^2 = \sum_{k=1}^4 \frac{c_k^2}{(m_k - \lambda)^2} .
+\end{equation*}
+As $\lambda$ decreases from $m_1$ to $-\infty$, every term decreases, from $+\infty$ (if $c_1 \neq 0$) to $0$, so exactly one $\lambda^* < m_1$ gives $|R(\lambda^*)| = 1$: the multiplier of the minimizer. Finding it is a one-dimensional root-finding problem, but $|R(\lambda)|$ has a pole at $m_1$, which makes Newton's method on $|R(\lambda)| - 1$ overshoot. The standard remedy \cite{MoreSorensen1983} is to apply Newton's method to the reciprocal, $\psi(\lambda) = 1/|R(\lambda)|$, which is almost linear.
+
+\begin{prop}
+\label{prop:secular_newton}
+On $(-\infty, m_1)$, $\psi$ is decreasing and concave. Newton's method for $\psi(\lambda) = 1$, started at any $\lambda^{(0)} \in [\lambda^*, m_1)$, produces a decreasing sequence that converges to $\lambda^*$.
+\end{prop}
+\begin{proof}
+Let $\phi(\lambda) = |R(\lambda)|^2 = \sum_k c_k^2 t_k^{-2}$ with $t_k = m_k - \lambda > 0$, so that $\psi = \phi^{-1/2}$. Since $dt_k/d\lambda = -1$, $\phi' = 2 \sum_k c_k^2 t_k^{-3} > 0$ and $\phi'' = 6 \sum_k c_k^2 t_k^{-4}$; hence $\psi' = -\frac12 \phi^{-3/2} \phi' < 0$, and
+\begin{equation*}
+\begin{aligned}
+\psi'' &= \tfrac14 \, \phi^{-5/2} \big( 3 \phi'^2 - 2 \phi \, \phi'' \big) \\
+&= 3 \, \phi^{-5/2} \Big( \big( \textstyle\sum_k c_k^2 t_k^{-3} \big)^2 - \big( \sum_k c_k^2 t_k^{-2} \big) \big( \sum_k c_k^2 t_k^{-4} \big) \Big) \leq 0
+\end{aligned}
+\end{equation*}
+by the Cauchy--Schwarz inequality applied to the vectors $(|c_k| t_k^{-1})_k$ and $(|c_k| t_k^{-2})_k$. Now let $\lambda^{(t)} \in (\lambda^*, m_1)$. There $\psi < 1$, so the Newton step $-(\psi - 1)/\psi'$ is negative and $\lambda^{(t+1)} < \lambda^{(t)}$. A concave function lies below its tangents, so at $\lambda^{(t+1)}$, where the tangent equals $1$, $\psi(\lambda^{(t+1)}) \leq 1$, that is $\lambda^{(t+1)} \geq \lambda^*$. The sequence is decreasing and bounded below by $\lambda^*$, so it converges, and its limit solves $\psi = 1$.
+\end{proof}
+
+The proposition is the mirror image of the usual argument for Newton's method on a convex function, and it needs a start between the root and the pole. One is at hand. Since $|R(\lambda)| \geq |c_1| / (m_1 - \lambda)$, the point $\lambda^{(0)} = m_1 - |c_1| = m_1 - |v_1 \cdot h_i|$ has $|R| \geq 1$, so it lies in $[\lambda^*, m_1)$. Each Newton step needs $|R|$ and $\psi'$; with a Cholesky factorization $M_i - \lambda I = L L^T$, which exists because the matrix is positive definite,
+\begin{gather*}
+R = L^{-T} L^{-1} h_i, \qquad \psi'(\lambda) = -\frac{R^T (M_i - \lambda I)^{-1} R}{|R|^3} = -\frac{|L^{-1} R|^2}{|R|^3},
+\\
+\lambda \leftarrow \lambda - \frac{\psi(\lambda) - 1}{\psi'(\lambda)} = \lambda + \frac{|R|^2 \, (1 - |R|)}{|L^{-1} R|^2} .
+\end{gather*}
+A $4 \times 4$ factorization and three triangular solves per step: the whole cell costs a few hundred floating-point operations, and Newton's method converges in two to four steps in our experiments (Section~\ref{section:results_exact}).
+
+\paragraph{The smallest eigenpair.} The start needs $m_1$ and $v_1$. They come from the characteristic polynomial $P(\lambda) = \det(M_i - \lambda I) = \prod_k (m_k - \lambda)$, whose coefficients follow from the traces of $M_i$, $M_i^2$ and $M_i^3$ and from $\det M_i$ by Newton's identities. On $(-\infty, m_1]$ every factor is non-negative, so $P$ is positive, decreasing and convex there, and Newton's method started from any point below $m_1$ increases monotonically to $m_1$, by the same tangent argument. Since $M_i$ is positive semi-definite, $\lambda = 0$ is such a point. The eigenvector follows from the adjugate: $(M_i - m_1 I) \, \mathrm{adj}(M_i - m_1 I) = P(m_1) \, I = 0$, so every column of the adjugate is a multiple of $v_1$, and the column $k$ has length proportional to $|v_{1,k}|$. Taking the column with the largest diagonal entry, the largest coordinate of $v_1$, avoids the columns that vanish, and gives $v_1$ to full accuracy.
+
+\paragraph{The hard case.} When the pull is orthogonal to the cell's own rotation, $c_1 = v_1 \cdot h_i = 0$, the pole at $m_1$ disappears and $|R(\lambda)|$ stays bounded as $\lambda \to m_1$. If its limit $|y|$, with $y = \sum_{k \geq 2} c_k v_k / (m_k - m_1)$, is less than one, the multiplier stops at $\lambda^* = m_1$ and the minimizer is $R^*_i = y \pm \sqrt{1 - |y|^2} \, v_1$: the part along $v_1$ is no longer determined by the pull, only completed to unit length. This \emph{hard case} of the trust-region literature \cite{MoreSorensen1983} looks like a curiosity, but Section~\ref{section:hard_case} shows that it is exactly what happens when a handle is turned by $180^\circ$.
+
+\paragraph{Two limits.} The exact cell interpolates between two familiar answers. Without bending, $\alpha A \to 0$, the pull vanishes, $\lambda^* \to m_1$, and $R^*_i \to \pm v_1$: the ARAP rotation of the cell, with the sign chosen by the side of the pull, which also resolves the ambiguity between $R$ and $-R$. With very stiff bending, $\alpha A \to \infty$, the membrane term becomes negligible, $\lambda^* \approx -|h_i|$, and $R^*_i \to g_i / |g_i|$: the normalized mean of the neighbors. The linearized cell has the same two limits whenever the neighbors agree, $|g_i| = 1$, which is another way to see why it works.
+
+\subsection{Constrained cells and large rotations}
+\label{section:hard_case}
+
+The cells inside a handle are computed from (\ref{eq:rotation_constraint}), the cell equation without feedback with the neighbors' previous rotations: they fit their edges, which the handle moves rigidly, smoothed towards their neighbors. Consider what this rule does when the user turns a handle by a large angle $\theta$ at once. The edges of a cell inside the handle are rotated rigidly by $\theta$, so its own rotation $v_1$ is the handle's rotation; its neighbors, outside the handle, are still at rest. For unit quaternions, the inner product of two rotations that differ by an angle $\theta$ is $\pm \cos(\theta/2)$. At $\theta = 180^\circ$ it vanishes: the handle's rotation and the rest rotation are \emph{orthogonal} quaternions, $c_1 = v_1 \cdot h_i = 0$, which is the condition of the hard case of Section~\ref{section:exact_cell}.
+
+What happens then is the same with the linearized and with the exact cell, and it is not what the user expects. The linearized solution is $\sum_k c_k v_k / (m_k + \alpha A)$: its component along the handle's rotation, $c_1 / (m_1 + \alpha A)$, is zero, so the cell takes a rotation built from the other eigen-directions of $M_i$, close to the pull. The exact solution could add a component along $v_1$, but only if $|y| < 1$, that is, if the pull is weak compared with the stiffness of the cell's edges. In the handles of our experiments it is not: the exact multiplier stays within $1.5\%$ of $-\alpha A$, and the exact cell agrees with the linearized one to $10^{-3}$ degrees (Table~\ref{tab:exact_cells}). Either way, the cells of the handle do not follow the handle: they stay close to the rotation of their neighbors, and the bar is pinched just below the handle (Figure~\ref{fig:hard_case}(a)). The rotation field is in a balanced but unstable configuration. It leaves it only when round-off and the slow changes of the positions break the symmetry, which on the bar takes between $1{,}000$ and $2{,}000$ local/global iterations; this is the slow convergence of large twists noted in Section~\ref{section:results_twist}.
+
+The cure follows from the diagnosis. A constrained cell does not need to be smoothed towards its neighbors: its rotation is not an unknown of the local step, and the handle prescribes how its edges move. In the hard case, where the smoothing can only drag the cell away from the handle, we let the cell take its own rotation instead,
+\begin{equation}
+\label{eq:own_fit}
+R^{const}_i = \pm v_1(M_i) \qquad \text{if} \quad 2 \arccos \frac{|v_1 \cdot h_i|}{|h_i|} > \theta_{\max},
+\end{equation}
+and keep (\ref{eq:rotation_constraint}) otherwise. The left-hand side of the test is the angle, as a rotation, between the cell's own fit and the pull of its neighbors, and $v_1$ is the smallest eigenvector of $M_i$, computed as in Section~\ref{section:exact_cell}. The sign is taken on the side of the handle's quaternion, which the user turns continuously and which therefore stays on one branch; choosing it cell by cell, from the previous rotations, would be arbitrary exactly in the hard case, since the previous rotations are orthogonal to $v_1$. We use $\theta_{\max} = 90^\circ$, halfway to the orthogonal configuration. The rule changes nothing at the fixed point of the local/global loop: once the rotation has spread from the handle, the pull of a constrained cell agrees with its fit, the test fails, and the cell equation is used again. It only changes the path to the fixed point, and Section~\ref{section:results_exact} shows how much shorter that path becomes.
 
 \section{Multiresolution Optimization}
 
@@ -814,9 +926,92 @@ With feedback ($e = 0.2$) the twist follows the handle all the way to $270^\circ
   \label{fig:twist270}
 \end{figure}
 
+\subsection{Exact cells and large rotations}
+\label{section:results_exact}
+
+\paragraph{How good is the frozen multiplier?} Table~\ref{tab:exact_cells} compares, cell by cell, the linearized cell equation with the exact cell on the unit sphere of Section~\ref{section:exact_cell}, at the same state: five local/global iterations into the solves of the bar bent into a $90^\circ$ arc, of the bar twisted by $180^\circ$, and of the Armadillo; and, for the twisted bar, also the cells inside the handle at the first local step, right after the handle has turned. The true multiplier is within $0.03\%$ of the frozen value $-\alpha A$ in the median free cell and within $0.4\%$ in the median handle cell, and within $3\%$ in the worst cell, the Armadillo's most deformed one, as Proposition~\ref{prop:multiplier} predicts for nearly rigid cells. The rotations are closer still: the normalized linearized cell differs from the exact one by at most $0.15^\circ$, and in the median cell by less than $10^{-4}$ degrees. The same holds in the hard case at the handle, where the pull is orthogonal to the cell's own rotation. The linearization therefore does not change the cell problem in any significant way, which confirms with an exact reference what Section~\ref{section:linearization} assumed. The exact solve itself is cheap, two to three Newton steps for the multiplier after three to five for the smallest eigenvalue: three Gauss--Seidel sweeps of exact cells cost $7.4$~ms on the bar and $0.47$~ms on the Armadillo's control mesh, against $14.5$ and $0.84$~ms for the PCG local step and $1.2$ and $0.08$~ms for three sweeps of the linearized relaxation. Since the results are the same, we keep the linearized local step.
+
+\begin{table}[t]
+  \centering
+  \caption{The linearized cell against the exact cell on the unit sphere, at the same state. The multiplier gap is $|\lambda^* + \alpha A| / \alpha A$; the angle is between the normalized linearized rotation and the exact one; the pull angle is the largest angle, as a rotation, between a cell's own fit $v_1$ and the pull $h_i$ of its neighbors; the steps are the mean Newton steps for the smallest eigenvalue and for the multiplier.}
+  \label{tab:exact_cells}
+  {\scriptsize\setlength{\tabcolsep}{2pt}
+  \begin{tabular}{llrrrrrrr}
+    \toprule
+    Scene & Cells & Count & \multicolumn{2}{c}{Multiplier gap} & \multicolumn{2}{c}{Angle (deg)} & Pull & Steps \\
+     & & & median & max & median & max & max & \\
+    \midrule
+    Bar, arc $90^\circ$     & free        & 6{,}048 & $2.4 \cdot 10^{-4}$ & $1.6 \cdot 10^{-3}$ & $2 \cdot 10^{-5}$ & $5 \cdot 10^{-4}$ & $84^\circ$  & 4.7 + 3.0 \\
+    Bar, twist $180^\circ$  & free        & 6{,}048 & $5 \cdot 10^{-8}$   & $4.6 \cdot 10^{-3}$ & $0$               & $1 \cdot 10^{-3}$ & $180^\circ$ & 3.7 + 2.3 \\
+    Bar, twist $180^\circ$  & handle, 1st & 1{,}898 & $3.5 \cdot 10^{-3}$ & $1.5 \cdot 10^{-2}$ & $0$ & $9 \cdot 10^{-4}$ & $180^\circ$ & 1.3 + 1.9 \\
+    Armadillo, control      & free        & 316     & $5.1 \cdot 10^{-5}$ & $3.0 \cdot 10^{-2}$ & $2 \cdot 10^{-6}$ & $0.15$            & $38^\circ$  & 3.8 + 2.4 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{The handle cells.} The exact cell does not, however, make large twists converge faster: with three exact sweeps per local step the $180^\circ$ twist of the bar still takes about $2{,}500$ iterations to settle (Figure~\ref{fig:exact_convergence}), because the slow part is not the linearization but the rule for the handle cells (Section~\ref{section:hard_case}). Table~\ref{tab:adaptive} and Figure~\ref{fig:exact_convergence} compare that rule with the adaptive rule (\ref{eq:own_fit}), on the twisted bar, on the bar bent into a $180^\circ$ arc and twisted by $180^\circ$, on the $90^\circ$ arc and on the Armadillo, all set at once and solved with the PCG local step. We count the iterations until the SR-ARAP energy stays within $1\%$ of its final value. On the twisted bar the adaptive rule needs 390 iterations instead of 2{,}030, and on the twisted arc 420 instead of 2{,}230: five times fewer. On the $90^\circ$ arc, where the handle turns by $90^\circ$ and its quaternion is at $45^\circ$ from the rest, the rule acts during the first iterations and saves a fifth of them. On the Armadillo it never triggers, and the results are identical. In every case the adaptive rule reaches the same fixed point as the cell equation, as it should, since it reverts to the cell equation once the rotations have spread: the final energies agree to four digits, except on the twisted arc, where after 3{,}000 iterations the cell equation is still $0.2\%$ above, and still decreasing. Figure~\ref{fig:hard_case} shows what the user sees: after 100 iterations, the twisted bar is still pinched under the handle with the cell equation, and evenly twisted with the adaptive rule; after 300, the twisted arc is still flattened, and round with the adaptive rule. The threshold hardly matters: for $\theta_{\max}$ between $45^\circ$ and $150^\circ$ the twisted bar settles after the same 383 iterations, and the $90^\circ$ arc after 358 to 691, always at the same energy. The rule costs one smallest-eigenvector computation per handle cell, which adds $0.5$~ms to the $14.5$~ms of a PCG local step on the bar.
+
+\begin{table}[t]
+  \centering
+  \caption{Local/global iterations, and time, until the SR-ARAP energy stays within $1\%$ of its final value, with the cell equation (\ref{eq:rotation_constraint}) for the handle cells and with the adaptive rule (\ref{eq:own_fit}), $\theta_{\max} = 90^\circ$; and the final energy of both, after 3{,}000 iterations (300 on the Armadillo).}
+  \label{tab:adaptive}
+  {\scriptsize\setlength{\tabcolsep}{2.5pt}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    Scene & \multicolumn{2}{c}{Cell equation} & \multicolumn{2}{c}{Adaptive rule} & \multicolumn{2}{c}{Final energy} \\
+     & iterations & time (s) & iterations & time (s) & cell eq. & adaptive \\
+    \midrule
+    Bar, twist $180^\circ$              & 2{,}030 & 30.5 & 390 & 6.1  & 0.9333 & 0.9334 \\
+    Bar, arc + twist $180^\circ$ & 2{,}230 & 33.7 & 420 & 6.7  & 1.6471 & 1.6438 \\
+    Bar, arc $90^\circ$                 & 700     & 10.4 & 550 & 8.5  & 0.2233 & 0.2233 \\
+    Armadillo, control                  & 50      & 0.05 & 50  & 0.05 & 0.8111 & 0.8111 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.49\textwidth}
+  \begin{tikzpicture}
+    \begin{semilogyaxis}[width=0.95\textwidth, height=5.2cm, xlabel={local/global iterations}, ylabel={SR-ARAP energy},
+        xmax=3000, legend below=1, tick label style={font=\scriptsize}, label style={font=\small}, unbounded coords=discard]
+      \addplot[thick, black] table[x=iteration, y=energy, col sep=comma, select={scene}{bar_twist180}{method}{closed}] {data/exact_convergence.csv};
+      \addplot[thick, teal, dashed] table[x=iteration, y=energy, col sep=comma, select={scene}{bar_twist180}{method}{exact3}] {data/exact_convergence.csv};
+      \addplot[thick, orange!80!black] table[x=iteration, y=energy, col sep=comma, select={scene}{bar_twist180}{method}{adaptive}] {data/exact_convergence.csv};
+      \legend{cell equation, exact cells, adaptive rule}
+    \end{semilogyaxis}
+  \end{tikzpicture}
+  \caption{Bar, twist $180^\circ$}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\textwidth}
+  \begin{tikzpicture}
+    \begin{semilogyaxis}[width=0.95\textwidth, height=5.2cm, xlabel={local/global iterations}, ylabel={SR-ARAP energy},
+        xmax=3000, legend below=1, tick label style={font=\scriptsize}, label style={font=\small}, unbounded coords=discard]
+      \addplot[thick, black] table[x=iteration, y=energy, col sep=comma, select={scene}{bar_arc180_twist180}{method}{closed}] {data/exact_convergence.csv};
+      \addplot[thick, teal, dashed] table[x=iteration, y=energy, col sep=comma, select={scene}{bar_arc180_twist180}{method}{exact3}] {data/exact_convergence.csv};
+      \addplot[thick, orange!80!black] table[x=iteration, y=energy, col sep=comma, select={scene}{bar_arc180_twist180}{method}{adaptive}] {data/exact_convergence.csv};
+      \legend{cell equation, exact cells, adaptive rule}
+    \end{semilogyaxis}
+  \end{tikzpicture}
+  \caption{Bar, arc $180^\circ$ and twist $180^\circ$}
+  \end{subfigure}
+  \caption{SR-ARAP energy per local/global iteration for large rotations set at once: the PCG local step with the cell equation (\ref{eq:rotation_constraint}) for the handle cells, three Gauss--Seidel sweeps of exact cells on the unit sphere (Section~\ref{section:exact_cell}), and the PCG local step with the adaptive rule (\ref{eq:own_fit}) for the handle cells.}
+  \label{fig:exact_convergence}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.16\textwidth}\includegraphics[width=\textwidth]{figures/twist180_100_smoothed}\caption{}\end{subfigure}\hfill
+  \begin{subfigure}{0.16\textwidth}\includegraphics[width=\textwidth]{figures/twist180_100_adaptive}\caption{}\end{subfigure}\hfill
+  \begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{figures/arc180_twist180_300_smoothed}\caption{}\end{subfigure}\hfill
+  \begin{subfigure}{0.32\textwidth}\includegraphics[width=\textwidth]{figures/arc180_twist180_300_adaptive}\caption{}\end{subfigure}
+  \caption{Large rotations set at once, with the cell equation and with the adaptive rule for the handle cells. (a), (b)~The bar twisted by $180^\circ$, after 100 iterations: with the cell equation the handle cells stay at rest and the bar is pinched under the handle; with the adaptive rule the twist is already spread along the bar. (c), (d)~The bar bent into a $180^\circ$ arc and twisted by $180^\circ$, after 300 iterations.}
+  \label{fig:hard_case}
+\end{figure}
+
 \subsection{Gallery}
 
-Figure~\ref{fig:bar} shows the bar benchmark twisted by $180^\circ$, bent into circular arcs of $90^\circ$ and $180^\circ$, and twisted by $180^\circ$ while following each arc. In the $180^\circ$ arc the two ends of the bar meet the ground side by side, and the cross-section stays round along the whole arc. The stripes show that the twist is distributed evenly along the bar, as the smooth-rotation term intends: the rotation angle of the cells grows linearly with height, from $11^\circ$ at the bottom to $162^\circ$ just below the top handle. Large rotations need many local/global iterations, however: the $180^\circ$ twist takes about 2{,}000 iterations to spread along the bar, and after 600 it is still concentrated under the top handle. The closed form makes every local step exact, but it does not shorten the outer loop. Figure~\ref{fig:arc_comparison} compares the $180^\circ$ arc with the shape the original SR-ARAP local step converges to; they differ by at most 1.6\% of the bar length, around the top of the arc. Figure~\ref{fig:cactus} deforms the cactus with two handles. Bending the trunk along a $120^\circ$ arc folds it over until its top points sideways, with the arms following rigidly; moving the top handle by two thirds of the trunk's length without rotating it bends the trunk into an S-curve, and the top keeps its orientation.
+Figure~\ref{fig:bar} shows the bar benchmark twisted by $180^\circ$, bent into circular arcs of $90^\circ$ and $180^\circ$, and twisted by $180^\circ$ while following each arc. In the $180^\circ$ arc the two ends of the bar meet the ground side by side, and the cross-section stays round along the whole arc. The stripes show that the twist is distributed evenly along the bar, as the smooth-rotation term intends: the rotation angle of the cells grows linearly with height, from $11^\circ$ at the bottom to $162^\circ$ just below the top handle. Large rotations need many local/global iterations, however: the $180^\circ$ twist takes about 2{,}000 iterations to spread along the bar, and after 600 it is still concentrated under the top handle. The closed form makes every local step exact, but it does not shorten the outer loop; Section~\ref{section:results_exact} shows that the slow part is the rule for the handle cells, and how to remove it. Figure~\ref{fig:arc_comparison} compares the $180^\circ$ arc with the shape the original SR-ARAP local step converges to; they differ by at most 1.6\% of the bar length, around the top of the arc. Figure~\ref{fig:cactus} deforms the cactus with two handles. Bending the trunk along a $120^\circ$ arc folds it over until its top points sideways, with the arms following rigidly; moving the top handle by two thirds of the trunk's length without rotating it bends the trunk into an S-curve, and the top keeps its orientation.
 
 \begin{figure}[t]
   \centering
@@ -858,7 +1053,9 @@ The rotation system is also well conditioned. The feedback term bounds its small
 
 The experiments support three further conclusions. First, exactness matters at the iteration budgets used in practice: two or three relaxation sweeps leave rotation errors of several degrees, and limited sweeps slow the decrease of the energy. Second, the converged shapes are of high quality: compared with the original SR-ARAP local step they have 5--12\% lower ARAP distortion and smoother rotations, and they reach the distortion at which SR-ARAP stops 1.4 times sooner on a strongly bent bar and 4.6 times sooner on the Armadillo. Third, in the multiresolution setting the exact local step is a small part of an interactive frame on a 173{,}000-vertex model, 0.8~ms on its 502-vertex control mesh.
 
-The feedback term is part of the contribution. It gives temporal coherence while editing, favors the branch that large rotations are following, and bounds the smallest eigenvalue of the rotation system for any mesh and constraint set, while changing the converged shape by only a fraction of a percent. Its cost is a slower outer loop for very large rotations: on the bent bar the original SR-ARAP approaches its final shape in fewer local/global iterations, although it stops at a higher distortion, and our method is faster in wall-clock time only because each of its iterations is cheaper. Making the outer loop converge in fewer iterations, for example by adapting the feedback weight to the size of the rotation updates, is a natural direction for future work, as is an extension of the derivation to volumetric meshes.
+The feedback term is part of the contribution. It gives temporal coherence while editing, favors the branch that large rotations are following, and bounds the smallest eigenvalue of the rotation system for any mesh and constraint set, while changing the converged shape by only a fraction of a percent. Its cost is a slower outer loop for very large rotations: on the bent bar the original SR-ARAP approaches its final shape in fewer local/global iterations, although it stops at a higher distortion, and our method is faster in wall-clock time only because each of its iterations is cheaper.
+
+Finally, the linearization is a frozen Lagrange multiplier. Solving each cell exactly on the unit sphere, through its secular equation, shows that the true multiplier exceeds the frozen one by the cell's distortion and by the disagreement of its neighbors, which in our experiments keeps the linearized rotations within $0.15^\circ$ of the exact ones. The same analysis locates the slow convergence of large twists, which the exact cells do not cure either: a handle turned by $180^\circ$ has a rotation orthogonal, as a quaternion, to those of its neighbors, and the smoothing of the handle cells keeps them at rest. Letting those cells take their own rotation in that case, and only then, reaches the same shapes five times sooner on the twisted bar and on the twisted arc. An extension of the derivation to volumetric meshes is a natural direction for future work.
 
 
 

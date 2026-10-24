@@ -19,6 +19,7 @@ use faer::sparse::linalg::solvers::{Llt, Lu, SymbolicLlt, SymbolicLu};
 use faer::sparse::{SparseColMat, Triplet};
 use nalgebra::{Matrix3, Matrix4, Quaternion, Rotation3, UnitQuaternion, Vector4};
 
+use crate::exact;
 use crate::handle::Handle;
 use crate::iterative::{Preconditioner, SymmetricMatrix, pcg};
 use crate::laplacian::{Laplacian, PoissonSolver, Weights};
@@ -67,10 +68,32 @@ pub enum LocalStep {
     /// The baseline: block Gauss-Seidel sweeps over the per-cell equations, each cell solved with its neighbours'
     /// current rotations fixed. Converges to the closed-form solution (same linear system).
     Relaxation { sweeps: usize },
+    /// Gauss-Seidel sweeps like [`LocalStep::Relaxation`], but with the unit norm of the quaternions enforced: each
+    /// cell minimises its energy over the unit sphere exactly, solving `(M_i - lambda I) R_i = h_i, |R_i| = 1` for
+    /// the Lagrange multiplier `lambda` instead of freezing it at `-alpha A` ([`crate::exact`]).
+    Exact { sweeps: usize },
     /// The original SR-ARAP local step of Levi and Gotsman: rotation matrices, each cell fitted exactly by an SVD
     /// (orthogonal Procrustes) against its edges and its neighbours' current rotations, in Gauss-Seidel sweeps.
     /// Each cell update minimises the total SR-ARAP energy over that cell. No linearisation, no feedback.
     SrArap { sweeps: usize },
+}
+
+/// The rotation of a constrained cell (inside a handle).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConstrainedRule {
+    /// The linearized cell equation without feedback, smoothed towards the neighbours' previous rotations
+    /// (eq. `rotation_constraint` of the paper).
+    Smoothed,
+    /// The same cell energy minimised exactly on the unit sphere ([`crate::exact`]).
+    Exact,
+    /// The rotation that fits the cell's own edges best, without smoothing: the eigenvector of the smallest
+    /// eigenvalue of `M_i` (the ARAP rotation of the cell), on the side of its handle's rotation.
+    OwnFit,
+    /// [`ConstrainedRule::Smoothed`], except in the hard case where the cell's own fit and its neighbours' pull
+    /// disagree by more than `threshold_deg` as rotations (their quaternions are nearly orthogonal at 180
+    /// degrees): then [`ConstrainedRule::OwnFit`]. Once the rotations have spread, the pull agrees with the fit
+    /// again and the rule reverts to the smoothed one, so the fixed point is that of the paper.
+    Adaptive { threshold_deg: u32 },
 }
 
 /// Bending weight of the SR-ARAP baseline. Its bending term `||R_i - R_j||_F^2` is about `2 theta^2` for two
@@ -96,6 +119,8 @@ pub struct Deformer {
     /// None in control-only mode, where the control mesh is also the output mesh.
     high_solver: Option<PoissonSolver>,
     pub local_step: LocalStep,
+    /// How the rotations of the constrained cells are found, whatever the local step.
+    pub constrained_rule: ConstrainedRule,
     /// Feedback weight `e`. With `e > 0` the rotation system's smallest eigenvalue is at least `e`.
     pub feedback: f64,
     /// The rotation system keeps its sparsity pattern until the constraints change.
@@ -156,6 +181,7 @@ impl Deformer {
             low_solver,
             high_solver,
             local_step: LocalStep::Pcg,
+            constrained_rule: ConstrainedRule::Smoothed,
             feedback: FEEDBACK,
             rotation_symbolic: None,
             rotation_llt_symbolic: None,
@@ -198,6 +224,7 @@ impl Deformer {
             low_solver,
             high_solver: None,
             local_step: LocalStep::Pcg,
+            constrained_rule: ConstrainedRule::Smoothed,
             feedback: FEEDBACK,
             rotation_symbolic: None,
             rotation_llt_symbolic: None,
@@ -337,6 +364,7 @@ impl Deformer {
             LocalStep::ClosedForm => self.solve_low_rotations(),
             LocalStep::Pcg => self.solve_low_rotations_pcg(),
             LocalStep::Relaxation { sweeps } => self.solve_low_rotations_relaxation(sweeps),
+            LocalStep::Exact { sweeps } => self.solve_low_rotations_exact(sweeps),
             LocalStep::SrArap { sweeps } => self.solve_low_rotations_sr_arap(sweeps),
         }
     }
@@ -393,7 +421,7 @@ impl Deformer {
         for i in (0..n).filter(|&i| self.low_constrained[i]) {
             gather(i, &mut p, &mut q, &mut w);
             let neighbors: Vec<Quat> = self.low.neighbors[i].iter().map(|&j| self.low_rotations[j]).collect();
-            fixed[i] = coefficients(&fit_constrained(&p, &q, &w, alpha_area, &neighbors));
+            fixed[i] = self.constrained_fit(&p, &q, &w, alpha_area, &neighbors, &self.constrained_hint(i));
         }
 
         let mut triplets = Vec::with_capacity(m * 12);
@@ -476,6 +504,20 @@ impl Deformer {
     }
 
     /// Takes the solution `x` of `system` as the new rotations.
+    /// The norms of the free cells' quaternions in the closed-form solution of the local step at the current state,
+    /// before they are normalized: how far the linearized rotations are from the unit sphere.
+    pub fn closed_form_norms(&mut self) -> Vec<f64> {
+        let system = self.rotation_system();
+        if self.pcg_preconditioner.as_ref().is_none_or(|(e, _)| *e != self.feedback) {
+            self.pcg_preconditioner = Some((self.feedback, Preconditioner::constant_cholesky(&system)));
+        }
+        let preconditioner = &self.pcg_preconditioner.as_ref().unwrap().1;
+        let matrix = SymmetricMatrix::from_lower(system.size, &system.lower);
+        let mut x = system.previous.clone();
+        pcg(&matrix, &system.rhs, &mut x, preconditioner, PCG_MAX_ITERATIONS, PCG_TOLERANCE, |_, _| true);
+        x.chunks(4).map(|c| (c[0] * c[0] + c[1] * c[1] + c[2] * c[2] + c[3] * c[3]).sqrt()).collect()
+    }
+
     pub fn apply_rotation_solution(&mut self, system: &RotationSystem, x: &[f64]) {
         self.low_rotations = self.rotations_from(system, x);
         self.low_differentials = rotated_differentials(&self.low, &self.low_laplacian, &self.low_rotations);
@@ -546,6 +588,177 @@ impl Deformer {
         (distortion / scale, (angles / edges as f64).sqrt())
     }
 
+    /// The cell problems of the local step at the current state: each cell's membrane matrix `M_i`, its ring's
+    /// edges, and whether it is constrained.
+    fn cell_matrices(&self) -> Vec<Matrix4<f64>> {
+        let (mut p, mut q, mut w) = (Vec::new(), Vec::new(), Vec::new());
+        (0..self.low.num_vertices())
+            .map(|i| {
+                p.clear();
+                q.clear();
+                w.clear();
+                for (&j, &wij) in self.low.neighbors[i].iter().zip(&self.low_laplacian.weights[i]) {
+                    p.push(self.low.positions[j] - self.low.positions[i]);
+                    q.push(self.low_positions[j] - self.low_positions[i]);
+                    w.push(wij);
+                }
+                fit_matrix(&p, &q, &w)
+            })
+            .collect()
+    }
+
+    /// The right-hand side `h_i = alpha A / (d_i + e) (sum_j R_j + e R_i^prev)` of a free cell, or
+    /// `alpha A / d_i sum_j R_j^prev` of a constrained one (the cell equations of the paper).
+    fn cell_rhs(&self, i: usize, current: &[Vector4<f64>], previous: &[Vector4<f64>]) -> Vector4<f64> {
+        let alpha_area = ALPHA * self.mesh_area;
+        let ring = &self.low.neighbors[i];
+        if self.low_constrained[i] {
+            let mut b = Vector4::zeros();
+            for &j in ring {
+                b += previous[j];
+            }
+            return b * (alpha_area / ring.len() as f64);
+        }
+        let mut b = previous[i] * self.feedback;
+        for &j in ring {
+            b += current[j];
+        }
+        b * (alpha_area / (ring.len() as f64 + self.feedback))
+    }
+
+    /// Replaces the control-mesh rotations, e.g. to run several local steps from the same state.
+    pub fn set_low_rotations(&mut self, rotations: &[Quat]) {
+        self.low_rotations = rotations.to_vec();
+        self.low_differentials = rotated_differentials(&self.low, &self.low_laplacian, &self.low_rotations);
+    }
+
+    /// The quaternion that decides the sign of a constrained cell's own fit: the rotation of the handle that drives
+    /// it (the user turns a handle continuously, so its quaternion stays on one branch), or the cell's previous
+    /// rotation for the other rules.
+    fn constrained_hint(&self, i: usize) -> Vector4<f64> {
+        if matches!(self.constrained_rule, ConstrainedRule::OwnFit | ConstrainedRule::Adaptive { .. }) {
+            if let Some(h) = self.handles.iter().find(|h| h.constraints.contains(&i)) {
+                return coefficients(&h.rotation);
+            }
+        }
+        coefficients(&self.low_rotations[i])
+    }
+
+    /// The rotation of a constrained cell from its edges and its neighbours' previous rotations: the linearized
+    /// cell equation without feedback, its exact solution, or its own fit, by [`Deformer::constrained_rule`].
+    fn constrained_fit(
+        &self,
+        p: &[Vec3],
+        q: &[Vec3],
+        w: &[f64],
+        alpha_area: f64,
+        neighbors: &[Quat],
+        own: &Vector4<f64>,
+    ) -> Vector4<f64> {
+        let h = || {
+            let mut h = Vector4::zeros();
+            for r in neighbors {
+                h += coefficients(r);
+            }
+            h * (alpha_area / neighbors.len() as f64)
+        };
+        match self.constrained_rule {
+            ConstrainedRule::Smoothed => coefficients(&fit_constrained(p, q, w, alpha_area, neighbors)),
+            ConstrainedRule::Exact => exact::exact_cell(&fit_matrix(p, q, w), &h(), own).rotation,
+            ConstrainedRule::OwnFit => {
+                let v1 = exact::cell_rotation(&fit_matrix(p, q, w));
+                if v1.dot(own) < 0.0 { -v1 } else { v1 }
+            }
+            ConstrainedRule::Adaptive { threshold_deg } => {
+                let m = fit_matrix(p, q, w);
+                let v1 = exact::cell_rotation(&m);
+                let h = h();
+                // the angle between two rotations is twice the angle between their quaternions (up to sign)
+                let pull = 2.0 * (v1.dot(&h).abs() / h.norm()).min(1.0).acos();
+                if pull.to_degrees() > threshold_deg as f64 {
+                    if v1.dot(own) < 0.0 { -v1 } else { v1 }
+                } else {
+                    coefficients(&fit_constrained(p, q, w, alpha_area, neighbors))
+                }
+            }
+        }
+    }
+
+    /// The exact local step: Gauss-Seidel sweeps in which every cell is solved on the unit sphere.
+    fn solve_low_rotations_exact(&mut self, sweeps: usize) {
+        let previous: Vec<Vector4<f64>> = self.low_rotations.iter().map(coefficients).collect();
+        let mut current = previous.clone();
+        let matrices = self.cell_matrices();
+        for i in (0..self.low.num_vertices()).filter(|&i| self.low_constrained[i]) {
+            current[i] = exact::exact_cell(&matrices[i], &self.cell_rhs(i, &current, &previous), &previous[i]).rotation;
+        }
+        for _ in 0..sweeps {
+            for i in (0..self.low.num_vertices()).filter(|&i| !self.low_constrained[i]) {
+                current[i] = exact::exact_cell(&matrices[i], &self.cell_rhs(i, &current, &previous), &previous[i]).rotation;
+            }
+        }
+        self.low_rotations =
+            current.iter().map(|c| Quat::new_normalize(Quaternion::new(c[0], c[1], c[2], c[3]))).collect();
+        self.low_differentials = rotated_differentials(&self.low, &self.low_laplacian, &self.low_rotations);
+    }
+
+    /// For every free cell at the current state (neighbours at their current rotations): the multiplier `lambda*`
+    /// of its exact solution, the frozen multiplier `-alpha A` of the linearization, the smallest eigenvalue `m1`
+    /// of `M_i`, the Newton steps (eigenvalue, secular equation), and the angle (rad) between the exact solution
+    /// and the normalized linearized one.
+    /// With `constrained`, the same for the constrained cells, whose right-hand side uses the previous rotations.
+    pub fn exact_cell_statistics(&self, constrained: bool) -> Vec<(f64, f64, f64, usize, usize, f64)> {
+        let alpha_area = ALPHA * self.mesh_area;
+        let current: Vec<Vector4<f64>> = self.low_rotations.iter().map(coefficients).collect();
+        let matrices = self.cell_matrices();
+        (0..self.low.num_vertices())
+            .filter(|&i| self.low_constrained[i] == constrained)
+            .map(|i| {
+                let h = self.cell_rhs(i, &current, &current);
+                let c = exact::exact_cell(&matrices[i], &h, &current[i]);
+                let mut g = matrices[i];
+                for k in 0..4 {
+                    g[(k, k)] += alpha_area;
+                }
+                let linear = (g.try_inverse().expect("positive definite") * h).normalize();
+                let angle = 2.0 * linear.dot(&c.rotation).abs().min(1.0).acos();
+                (c.multiplier, -alpha_area, c.smallest_eigenvalue, c.eigen_steps, c.secular_steps, angle)
+            })
+            .collect()
+    }
+
+    /// For every cell: the angle (degrees) between the rotation `v1` that fits the cell's own edges best (the
+    /// eigenvector of the smallest eigenvalue of `M_i`) and the neighbours' pull `h_i`, as rotations, that is
+    /// `2 acos |v1.h| / |h|`.
+    pub fn pull_angles(&self, constrained: bool) -> Vec<f64> {
+        let current: Vec<Vector4<f64>> = self.low_rotations.iter().map(coefficients).collect();
+        let matrices = self.cell_matrices();
+        (0..self.low.num_vertices())
+            .filter(|&i| self.low_constrained[i] == constrained)
+            .map(|i| {
+                let h = self.cell_rhs(i, &current, &current);
+                let e = matrices[i].symmetric_eigen();
+                let v1 = e.eigenvectors.column(e.eigenvalues.imin()).into_owned();
+                2.0 * (v1.dot(&h).abs() / h.norm()).min(1.0).acos().to_degrees()
+            })
+            .collect()
+    }
+
+    /// The SR-ARAP energy of the local step with unit quaternions, `sum_i R_i^T M_i R_i + alpha A sum_j w_ij
+    /// |R_i - R_j|^2` with `w_ij = 1/d_i` (no feedback): the energy that the exact cells minimise one at a time.
+    pub fn unit_energy(&self) -> f64 {
+        let alpha_area = ALPHA * self.mesh_area;
+        let r: Vec<Vector4<f64>> = self.low_rotations.iter().map(coefficients).collect();
+        let matrices = self.cell_matrices();
+        (0..self.low.num_vertices())
+            .map(|i| {
+                let ring = &self.low.neighbors[i];
+                let bending: f64 = ring.iter().map(|&j| (r[i] - r[j]).norm_squared()).sum::<f64>() / ring.len() as f64;
+                (r[i].transpose() * matrices[i] * r[i])[0] + alpha_area * bending
+            })
+            .sum()
+    }
+
     fn solve_low_rotations_relaxation(&mut self, sweeps: usize) {
         let relaxed = self.relax(sweeps, |_| {});
         self.low_rotations =
@@ -576,7 +789,7 @@ impl Deformer {
             }
             if self.low_constrained[i] {
                 let neighbors: Vec<Quat> = self.low.neighbors[i].iter().map(|&j| self.low_rotations[j]).collect();
-                current[i] = coefficients(&fit_constrained(&p, &q, &w, alpha_area, &neighbors));
+                current[i] = self.constrained_fit(&p, &q, &w, alpha_area, &neighbors, &self.constrained_hint(i));
             } else {
                 let mut m = fit_matrix(&p, &q, &w);
                 for c in 0..4 {
@@ -697,7 +910,7 @@ impl Deformer {
                 }
             } else {
                 let neighbors: Vec<Quat> = ring[..degree].iter().map(|&j| self.low_rotations[j]).collect();
-                let fitted = coefficients(&fit_constrained(&p, &q, &w, alpha_area, &neighbors));
+                let fitted = self.constrained_fit(&p, &q, &w, alpha_area, &neighbors, &self.constrained_hint(i));
                 for c in 0..4 {
                     rhs[(ii + c, 0)] = fitted[c];
                     triplets.push(Triplet::new(ii + c, ii + c, 1.0));
