@@ -72,6 +72,9 @@ pub enum LocalStep {
     /// (orthogonal Procrustes) against its edges and its neighbours' current rotations, in Gauss-Seidel sweeps.
     /// Each cell update minimises the total SR-ARAP energy over that cell. No linearisation, no feedback.
     SrArap { sweeps: usize },
+    /// Plain ARAP (Sorkine and Alexa): no bending term, every cell's rotation fitted on its own, with
+    /// [`Deformer::fit`]; the rotations are stored as quaternions. (`ColoredSvd` is the same as `Svd` here.)
+    Arap,
 }
 
 /// How the SR-ARAP baseline fits each cell's rotation, the orthogonal Procrustes problem `max tr(R^T M_i)`.
@@ -313,7 +316,7 @@ impl Deformer {
         }
         for _ in 0..ITERATIONS_PER_FRAME {
             // The SR-ARAP baseline runs with its own local step; every other mode uses the closed form.
-            if matches!(self.local_step, LocalStep::SrArap { .. }) {
+            if matches!(self.local_step, LocalStep::SrArap { .. } | LocalStep::Arap) {
                 self.local();
             } else {
                 self.solve_low_rotations();
@@ -385,6 +388,7 @@ impl Deformer {
             LocalStep::Pcg => self.solve_low_rotations_pcg(),
             LocalStep::Relaxation { sweeps } => self.solve_low_rotations_relaxation(sweeps),
             LocalStep::SrArap { sweeps } => self.solve_low_rotations_sr_arap(sweeps),
+            LocalStep::Arap => self.solve_low_rotations_arap(),
         }
     }
 
@@ -565,6 +569,69 @@ impl Deformer {
             }
         }
         self.finish_sr_arap(&rotations);
+    }
+
+    /// The plain ARAP local step: each cell's best rotation for its own edges, independent of the others.
+    fn solve_low_rotations_arap(&mut self) {
+        let covariances = self.covariances();
+        let bounds = self.arap_bounds();
+        let n = covariances.len();
+        let to_quat = |q: [f64; 4]| Quat::new_normalize(Quaternion::new(q[0], q[1], q[2], q[3]));
+        let mut rotations = vec![Quat::identity(); n];
+        match self.fit {
+            Fit::RotorSimd | Fit::FoamSimd => {
+                let solve = if self.fit == Fit::RotorSimd {
+                    procrustes::rotor_quaternion4
+                } else {
+                    procrustes::foam_quaternion4
+                };
+                for c in (0..n).step_by(4) {
+                    let idx = [0, 1, 2, 3].map(|l| (c + l).min(n - 1));
+                    let q = solve(idx.map(|i| &covariances[i]), idx.map(|i| bounds[i]));
+                    for (l, &i) in idx.iter().enumerate() {
+                        rotations[i] = to_quat(q[l]);
+                    }
+                }
+            }
+            Fit::Rotor => {
+                for i in 0..n {
+                    rotations[i] = to_quat(procrustes::rotor_quaternion(&covariances[i], bounds[i]));
+                }
+            }
+            Fit::Foam => {
+                for i in 0..n {
+                    rotations[i] = to_quat(procrustes::foam_quaternion(&covariances[i], bounds[i]));
+                }
+            }
+            Fit::Svd | Fit::ColoredSvd => {
+                for i in 0..n {
+                    let r = nearest_rotation(&covariances[i]);
+                    rotations[i] = UnitQuaternion::from_rotation_matrix(&Rotation3::from_matrix_unchecked(r));
+                }
+            }
+        }
+        self.low_rotations = rotations;
+        self.low_differentials = rotated_differentials(&self.low, &self.low_laplacian, &self.low_rotations);
+    }
+
+    /// `sum |c| (|p|^2 + |q|^2) / 2` for each cell: an upper bound of the nuclear norm of its covariance.
+    fn arap_bounds(&self) -> Vec<f64> {
+        (0..self.low.num_vertices())
+            .map(|i| {
+                let mut h = 0.0;
+                for (&j, &c) in self.low.neighbors[i].iter().zip(&self.low_laplacian.weights[i]) {
+                    let q = self.low.positions[j] - self.low.positions[i];
+                    let p = self.low_positions[j] - self.low_positions[i];
+                    h += 0.5 * c.abs() * (p.norm_squared() + q.norm_squared());
+                }
+                h
+            })
+            .collect()
+    }
+
+    /// The plain ARAP cell problems at the current state: covariances and bounds.
+    pub fn arap_cell_problems(&self) -> (Vec<Matrix3<f64>>, Vec<f64>) {
+        (self.covariances(), self.arap_bounds())
     }
 
     fn finish_sr_arap(&mut self, rotations: &[Matrix3<f64>]) {

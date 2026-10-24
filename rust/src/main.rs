@@ -36,6 +36,8 @@ struct Scene {
     handles: Vec<Handle>,
     /// `--srarap FIT`: use the SR-ARAP local step (3 Gauss-Seidel sweeps) with this per-cell fit.
     fit: Option<Fit>,
+    /// `--arap FIT`: plain ARAP (no bending), each cell fitted on its own.
+    plain: bool,
 }
 
 fn main() {
@@ -50,9 +52,9 @@ fn main() {
     let low = Mesh::read_obj(&scene.low).unwrap_or_else(|e| fail(&e));
     let mut deformer = Deformer::new(high, low, scene.handles);
     if let Some(fit) = scene.fit {
-        deformer.local_step = LocalStep::SrArap { sweeps: 3 };
+        deformer.local_step = if scene.plain { LocalStep::Arap } else { LocalStep::SrArap { sweeps: 3 } };
         deformer.fit = fit;
-        println!("SR-ARAP local step, 3 Gauss-Seidel sweeps, fit {fit:?}");
+        println!("{} local step, fit {fit:?}", if scene.plain { "plain ARAP" } else { "SR-ARAP (3 Gauss-Seidel sweeps)" });
     }
     for (k, handle) in deformer.handles.iter().enumerate() {
         println!("handle {k}: {} control vertices", handle.constraints.len());
@@ -67,10 +69,11 @@ fn fail(message: &str) -> ! {
 }
 
 fn usage() -> String {
-    "usage: arap [cactus|armadillo] [--data DIR] [--srarap FIT]\n       \
+    "usage: arap [cactus|armadillo] [--data DIR] [--srarap FIT | --arap FIT]\n       \
      arap --high HIGH.obj --low LOW.obj --handle X,Y,Z,R [--handle X,Y,Z,R ...] [--srarap FIT]\n\n\
      --srarap FIT: the SR-ARAP local step of Levi and Gotsman, each cell fitted by FIT, one of svd, colored-svd,\n\
      rotor, rotor-simd, foam, foam-simd (rotor = the geometric-algebra rotor estimator).\n\
+     --arap FIT: plain ARAP (no bending), each cell's rotation fitted on its own by FIT.\n\
      Handle centres are in the normalised frame: each mesh is centred and scaled to a bounding-box half-diagonal of 1."
         .to_string()
 }
@@ -82,6 +85,7 @@ fn parse_args() -> Result<Scene, String> {
     let mut low = None;
     let mut handles = Vec::new();
     let mut fit = None;
+    let mut plain = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
@@ -99,6 +103,11 @@ fn parse_args() -> Result<Scene, String> {
                     return Err(format!("--handle expects X,Y,Z,R, got {spec}"));
                 };
                 handles.push(Handle::new(DVec3::new(x, y, z), r));
+            }
+            "--arap" => {
+                let name = value("--arap")?;
+                fit = Some(Fit::parse(&name).ok_or_else(|| format!("unknown fit {name}"))?);
+                plain = true;
             }
             "--srarap" => {
                 let name = value("--srarap")?;
@@ -119,9 +128,9 @@ fn parse_args() -> Result<Scene, String> {
             if handles.is_empty() {
                 return Err("at least one --handle is required with --high/--low".into());
             }
-            Ok(Scene { high, low, handles, fit })
+            Ok(Scene { high, low, handles, fit, plain })
         }
-        (None, None) => preset_scene(preset.as_deref().unwrap_or("cactus"), &data, handles).map(|s| Scene { fit, ..s }),
+        (None, None) => preset_scene(preset.as_deref().unwrap_or("cactus"), &data, handles).map(|s| Scene { fit, plain, ..s }),
         _ => Err("--high and --low must be given together".into()),
     }
 }
@@ -146,7 +155,7 @@ fn preset_scene(name: &str, data: &Path, extra: Vec<Handle>) -> Result<Scene, St
         other => return Err(format!("unknown scene {other}; expected cactus or armadillo")),
     };
     handles.extend(extra);
-    Ok(Scene { high: data.join(high), low: data.join(low), handles, fit: None })
+    Ok(Scene { high: data.join(high), low: data.join(low), handles, fit: None, plain: false })
 }
 
 enum Drag {

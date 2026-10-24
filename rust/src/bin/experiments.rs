@@ -553,6 +553,140 @@ fn procrustes() {
     write("procrustes.csv", &csv);
 }
 
+/// Plain ARAP (no bending): every cell's rotation fitted on its own, as a quaternion, by the SVD (nalgebra's SVD,
+/// then nalgebra's matrix-to-quaternion conversion), by the rotor method of "Robust Quaternion Estimation with
+/// Geometric Algebra", or by FOAM followed by a branch-free conversion; one cell at a time, or four at a time in
+/// SIMD lanes. Writes `arap_plain.csv`: the local-step time from the same mid-solve state, the fit alone per cell,
+/// the largest rotation difference against the SVD after one local step, and the largest vertex distance against the
+/// SVD after 50 full iterations.
+fn arap_plain() {
+    let fits = [
+        ("svd", Fit::Svd),
+        ("rotor", Fit::Rotor),
+        ("rotor_simd", Fit::RotorSimd),
+        ("foam", Fit::Foam),
+        ("foam_simd", Fit::FoamSimd),
+    ];
+    let mut csv = String::from("scene,cells,fit,local_ms,fit_ns_per_cell,max_angle_rad,max_distance\n");
+    for scene in ["armadillo_control", "cactus", "tube", "armadillo_full"] {
+        let make = || -> Deformer {
+            let mut d = match scene {
+                "armadillo_control" => {
+                    let mut d = Deformer::new(load("armadillo.obj"), load("armadillo1.obj"), armadillo_handles());
+                    armadillo_pose(&mut d, 2);
+                    d
+                }
+                "armadillo_full" => {
+                    let mut d = Deformer::control_only(load("armadillo.obj"), armadillo_handles());
+                    armadillo_pose(&mut d, 2);
+                    d
+                }
+                "cactus" => {
+                    let mut d = Deformer::control_only(load("cactus2.obj"), vec![
+                        Handle::new(Vec3::new(0.0, 0.04, 0.7), 0.15),
+                        Handle::new(Vec3::new(0.0, 0.04, -0.8), 0.15),
+                    ]);
+                    d.handles[0].translation += Vec3::new(-0.1, 0.15, 0.0);
+                    d
+                }
+                _ => {
+                    let (mesh, handles) = tube_scene(161, 192);
+                    let length = tube_length(&mesh);
+                    let mut d = Deformer::control_only(mesh, handles);
+                    arc(&mut d.handles[1], length, 90.0);
+                    d
+                }
+            };
+            d.local_step = LocalStep::Arap;
+            d
+        };
+        let mut d = make();
+        d.fit = Fit::Svd;
+        for _ in 0..5 {
+            d.iterate();
+        }
+        let start = d.low_rotations().to_vec();
+        let cells = d.low.num_vertices();
+        d.set_low_rotations(&start);
+        d.local();
+        let reference_rotations = d.low_rotations().to_vec();
+        let mut reference = make();
+        reference.fit = Fit::Svd;
+        for _ in 0..50 {
+            reference.iterate();
+        }
+        d.set_low_rotations(&start);
+        let (ms, bounds) = d.arap_cell_problems();
+        for (label, fit) in fits {
+            // the fit alone, on the stored cell problems, writing quaternions
+            let mut out = vec![[0.0f64; 4]; cells];
+            let reps = (4_000_000 / cells).clamp(3, 2000);
+            let mut fit_ns = f64::MAX;
+            for _ in 0..5 {
+                let t = Instant::now();
+                for _ in 0..reps {
+                    match fit {
+                        Fit::RotorSimd | Fit::FoamSimd => {
+                            let solve = if fit == Fit::RotorSimd { procrustes::rotor_quaternion4 } else { procrustes::foam_quaternion4 };
+                            for c in (0..cells).step_by(4) {
+                                let idx = [0, 1, 2, 3].map(|l| (c + l).min(cells - 1));
+                                let q = solve(idx.map(|i| &ms[i]), idx.map(|i| bounds[i]));
+                                for (l, &i) in idx.iter().enumerate() {
+                                    out[i] = q[l];
+                                }
+                            }
+                        }
+                        Fit::Rotor => {
+                            for i in 0..cells {
+                                out[i] = procrustes::rotor_quaternion(&ms[i], bounds[i]);
+                            }
+                        }
+                        Fit::Foam => {
+                            for i in 0..cells {
+                                out[i] = procrustes::foam_quaternion(&ms[i], bounds[i]);
+                            }
+                        }
+                        _ => {
+                            for i in 0..cells {
+                                let q = nalgebra::UnitQuaternion::from_rotation_matrix(&nalgebra::Rotation3::from_matrix_unchecked(nearest_rotation(&ms[i])));
+                                out[i] = [q.w, q.i, q.j, q.k];
+                            }
+                        }
+                    }
+                    std::hint::black_box(&mut out);
+                }
+                fit_ns = fit_ns.min(t.elapsed().as_secs_f64() * 1e9 / (reps * cells) as f64);
+            }
+            // the local step from the same state
+            d.fit = fit;
+            let reps = (2_000_000 / cells).clamp(3, 200);
+            let mut best = f64::MAX;
+            for _ in 0..5 {
+                let mut total = 0.0;
+                for _ in 0..reps {
+                    d.set_low_rotations(&start);
+                    let t = Instant::now();
+                    d.local();
+                    total += t.elapsed().as_secs_f64();
+                }
+                best = best.min(total * 1e3 / reps as f64);
+            }
+            d.set_low_rotations(&start);
+            d.local();
+            let max_angle = d.low_rotations().iter().zip(&reference_rotations).map(|(a, b)| a.angle_to(b)).fold(0.0, f64::max);
+            let mut full = make();
+            full.fit = fit;
+            for _ in 0..50 {
+                full.iterate();
+            }
+            let max_distance = full.low_positions().iter().zip(reference.low_positions()).map(|(a, b)| (a - b).norm()).fold(0.0, f64::max);
+            writeln!(csv, "{scene},{cells},{label},{best:.4},{fit_ns:.1},{max_angle:.2e},{max_distance:.2e}").unwrap();
+            println!("{scene} ({cells} cells) {label}: local {best:.3} ms, fit {fit_ns:.1} ns/cell, max angle {max_angle:.2e}, distance after 50 {max_distance:.2e}");
+        }
+    }
+    write("arap_plain.csv", &csv);
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "all".to_string());
     if which == "all" || which == "convergence" {
@@ -575,6 +709,9 @@ fn main() {
     }
     if which == "all" || which == "timing" {
         timing();
+    }
+    if which == "arap_plain" {
+        arap_plain();
     }
     if which == "procrustes" {
         procrustes();

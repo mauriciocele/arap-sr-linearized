@@ -265,6 +265,57 @@ pub fn matrix<T: Lane>(q: &[T; 4]) -> [[T; 3]; 3] {
     ]
 }
 
+/// The unit quaternion `(w, x, y, z)` of a rotation matrix, branch-free: the columns of `4 q q^T` are linear in the
+/// matrix, and the one with the largest diagonal entry (at least 1) is taken with selects, as Shepperd does.
+#[inline(always)]
+pub fn quaternion<T: Lane>(r: &[[T; 3]; 3]) -> [T; 4] {
+    let one = T::splat(1.0);
+    let col = [
+        [one + r[0][0] + r[1][1] + r[2][2], r[2][1] - r[1][2], r[0][2] - r[2][0], r[1][0] - r[0][1]],
+        [r[2][1] - r[1][2], one + r[0][0] - r[1][1] - r[2][2], r[0][1] + r[1][0], r[0][2] + r[2][0]],
+        [r[0][2] - r[2][0], r[0][1] + r[1][0], one - r[0][0] + r[1][1] - r[2][2], r[1][2] + r[2][1]],
+        [r[1][0] - r[0][1], r[0][2] + r[2][0], r[1][2] + r[2][1], one - r[0][0] - r[1][1] + r[2][2]],
+    ];
+    let mut best = col[0][0];
+    let mut v = col[0];
+    for k in 1..4 {
+        let m = col[k][k].gt(best);
+        best = T::select(m, col[k][k], best);
+        for i in 0..4 {
+            v[i] = T::select(m, col[k][i], v[i]);
+        }
+    }
+    normalized(v)
+}
+
+/// Four problems in lanes, returning quaternions `(w, x, y, z)`.
+#[inline(always)]
+fn four_q(ms: [&Matrix3<f64>; 4], h: [f64; 4], solve: impl Fn(&[[f64x4; 3]; 3], f64x4) -> [f64x4; 4]) -> [[f64; 4]; 4] {
+    let b = [0, 1, 2].map(|r| [0, 1, 2].map(|c| f64x4::new(ms.map(|m| m[(r, c)]))));
+    let q = solve(&b, f64x4::new(h)).map(|v| v.to_array());
+    [0, 1, 2, 3].map(|l| [q[0][l], q[1][l], q[2][l], q[3][l]])
+}
+
+/// The quaternion of [`rotor`] for one problem given as a nalgebra matrix.
+pub fn rotor_quaternion(m: &Matrix3<f64>, h: f64) -> [f64; 4] {
+    rotor(&[0, 1, 2].map(|r| [0, 1, 2].map(|c| m[(r, c)])), h)
+}
+
+/// FOAM followed by the branch-free conversion [`quaternion`].
+pub fn foam_quaternion(m: &Matrix3<f64>, h: f64) -> [f64; 4] {
+    quaternion(&foam(&[0, 1, 2].map(|r| [0, 1, 2].map(|c| m[(r, c)])), h))
+}
+
+/// [`rotor_quaternion`] for four problems at once, in SIMD lanes.
+pub fn rotor_quaternion4(ms: [&Matrix3<f64>; 4], h: [f64; 4]) -> [[f64; 4]; 4] {
+    four_q(ms, h, |b, h| rotor(b, h))
+}
+
+/// [`foam_quaternion`] for four problems at once, in SIMD lanes.
+pub fn foam_quaternion4(ms: [&Matrix3<f64>; 4], h: [f64; 4]) -> [[f64; 4]; 4] {
+    four_q(ms, h, |b, h| quaternion(&foam(b, h)))
+}
+
 /// The rotation matrix of [`rotor`], for one problem given as a nalgebra matrix.
 pub fn rotor_matrix(m: &Matrix3<f64>, h: f64) -> Matrix3<f64> {
     let b = [0, 1, 2].map(|r| [0, 1, 2].map(|c| m[(r, c)]));
@@ -344,6 +395,30 @@ mod tests {
                 for k in 0..3 {
                     assert!((r[i][k] - reference[(i, k)]).abs() < 1e-9, "rotor, seed {seed}");
                     assert!((f[i][k] - reference[(i, k)]).abs() < 1e-7, "foam, seed {seed}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn quaternions_match_the_svd_rotation() {
+        for seed in 0..2000 {
+            let (b, h, m) = random_problem(seed);
+            let reference = nalgebra::UnitQuaternion::from_rotation_matrix(&nalgebra::Rotation3::from_matrix_unchecked(svd_rotation(&m)));
+            for q in [rotor_quaternion(&m, h), foam_quaternion(&m, h)] {
+                let q = nalgebra::UnitQuaternion::new_normalize(nalgebra::Quaternion::new(q[0], q[1], q[2], q[3]));
+                assert!(q.angle_to(&reference) < 1e-7, "seed {seed}");
+            }
+            let _ = b;
+        }
+        for seed in (0..400).step_by(4) {
+            let ps: Vec<_> = (0..4).map(|l| random_problem(seed + l)).collect();
+            let r4 = rotor_quaternion4([&ps[0].2, &ps[1].2, &ps[2].2, &ps[3].2], [ps[0].1, ps[1].1, ps[2].1, ps[3].1]);
+            let f4 = foam_quaternion4([&ps[0].2, &ps[1].2, &ps[2].2, &ps[3].2], [ps[0].1, ps[1].1, ps[2].1, ps[3].1]);
+            for l in 0..4 {
+                let (r1, f1) = (rotor_quaternion(&ps[l].2, ps[l].1), foam_quaternion(&ps[l].2, ps[l].1));
+                for c in 0..4 {
+                    assert!((r4[l][c] - r1[c]).abs() < 1e-10 && (f4[l][c] - f1[c]).abs() < 1e-8);
                 }
             }
         }
