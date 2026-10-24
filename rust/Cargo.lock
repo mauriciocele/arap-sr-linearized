@@ -104,6 +104,7 @@ dependencies = [
  "nalgebra",
  "png",
  "three-d",
+ "wide",
 ]
 
 [[package]]

@@ -7,3 +7,4 @@ pub mod laplacian;
 pub mod mesh;
 pub mod scenes;
 pub mod iterative;
+pub mod procrustes;

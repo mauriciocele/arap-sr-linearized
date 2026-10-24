@@ -7,7 +7,7 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
-use arap::deformer::{Deformer, LocalStep};
+use arap::deformer::{Deformer, Fit, LocalStep};
 use arap::handle::Handle;
 use arap::mesh::{Mesh, Vec3 as DVec3};
 use arap::scenes::{arc, armadillo_handles, armadillo_pose, load, tube_length, tube_scene, twist};
@@ -551,6 +551,72 @@ fn colorbar() {
     println!("wrote {}", path.display());
 }
 
+/// SR-ARAP (Levi and Gotsman) with each cell's rotation fitted by the geometric-algebra rotor estimator, four cells
+/// at a time in SIMD lanes: the poses of the application section of "Robust Quaternion Estimation with Geometric
+/// Algebra". Also renders the SVD result of the first armadillo pose and prints the largest vertex distance between
+/// the two, to show that only the time changes.
+fn srarap(context: &Context) {
+    let sr = |d: &mut Deformer, fit: Fit| {
+        d.local_step = LocalStep::SrArap { sweeps: 3 };
+        d.fit = fit;
+    };
+    let timed = |d: &mut Deformer, iterations: usize| {
+        let start = std::time::Instant::now();
+        converge(d, iterations);
+        start.elapsed().as_secs_f64() * 1e3 / iterations as f64
+    };
+    // Armadillo: SR-ARAP on the 502-vertex control mesh, transferred to the detailed mesh.
+    let eye = [1.2, 0.55, -3.6];
+    let target = [0.0, 0.12, 0.0];
+    let view = |d: &Deformer| {
+        let mut v = View::detail(d).with_handles(d).looking(eye, target).sized(900, 1200);
+        v.handle_alpha = 55;
+        v
+    };
+    for k in 1..=3 {
+        let mut d = armadillo();
+        sr(&mut d, Fit::RotorSimd);
+        armadillo_pose(&mut d, k);
+        let ms = timed(&mut d, 300);
+        println!("srarap armadillo pose {k}: {ms:.2} ms per local/global iteration (rotor, SIMD)");
+        render(context, &view(&d), &format!("srarap_armadillo_pose{k}"));
+        if k == 1 {
+            let mut e = armadillo();
+            sr(&mut e, Fit::ColoredSvd);
+            armadillo_pose(&mut e, k);
+            let ms_svd = timed(&mut e, 300);
+            let gap = d.high_positions.iter().zip(&e.high_positions).map(|(a, b)| (a - b).norm()).fold(0.0, f64::max);
+            println!("srarap armadillo pose 1 with the SVD: {ms_svd:.2} ms per iteration, max vertex distance {gap:.2e}");
+        }
+    }
+    // Cactus, deformed directly (5261 cells): the trunk bent along an arc of 120 degrees.
+    let handles = vec![Handle::new(DVec3::new(0.0, 0.04, 0.7), 0.15), Handle::new(DVec3::new(0.0, 0.04, -0.8), 0.15)];
+    let mut d = Deformer::control_only(load("cactus2.obj"), handles);
+    sr(&mut d, Fit::RotorSimd);
+    let upright = rot(Vector3::y(), 90.0) * rot(Vector3::x(), -90.0);
+    let (top, base) = (0.7, -0.8);
+    let phi = 120f64.to_radians();
+    let radius = (top - base) / phi;
+    d.handles[0].rotation = rot(Vector3::x(), -120.0);
+    d.handles[0].translation = DVec3::new(0.0, radius * (1.0 - phi.cos()), base + radius * phi.sin() - top);
+    let ms = timed(&mut d, 1000);
+    println!("srarap cactus: {ms:.2} ms per iteration");
+    render(context, &View::detail(&d).with_handles(&d).turned(upright).framed([0.17, 0.12, -1.0]), "srarap_cactus");
+    // Bar (7776 cells): a quarter-circle arc with a half twist.
+    let (mesh, handles) = tube_scene(81, 96);
+    let length = tube_length(&mesh);
+    let colors = stripes(&mesh);
+    let mut d = Deformer::control_only(mesh, handles);
+    sr(&mut d, Fit::RotorSimd);
+    arc(&mut d.handles[1], length, 90.0);
+    d.handles[1].rotation *= rot(Vector3::y(), 180.0);
+    let ms = timed(&mut d, 2000);
+    println!("srarap bar: {ms:.2} ms per iteration");
+    let mut v = View::detail(&d).with_handles(&d).sized(1000, 1000);
+    v.colors = Some(colors);
+    render(context, &v.framed([0.35, 0.3, -1.0]), "srarap_bar");
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "all".to_string());
     let window = Window::new(WindowSettings {
@@ -586,6 +652,9 @@ fn main() {
         }
         if which == "twist_sweep" {
             twist_sweep(&context);
+        }
+        if which == "srarap" {
+            srarap(&context);
         }
         if which == "dance" {
             dance::dance(&context, std::env::args().nth(2).as_deref().unwrap_or("all"));

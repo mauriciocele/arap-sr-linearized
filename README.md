@@ -31,7 +31,15 @@ cargo run --release -- armadillo        # Armadillo with a 502-vertex control me
 cargo run --release -- --data DIR cactus
 cargo run --release -- --high HIGH.obj --low LOW.obj --handle X,Y,Z,R [--handle X,Y,Z,R ...]
 cargo run --release -- --animate        # start with the first handle animated
+cargo run --release -- armadillo --srarap rotor-simd   # SR-ARAP local step, cells fitted by the rotor estimator
 ```
+
+`--srarap FIT` replaces the local step by the SR-ARAP one of Levi and Gotsman (three Gauss-Seidel sweeps, each cell's
+rotation fitted with its neighbours' rotations fixed). `FIT` is how each cell's rotation `max tr(R^T M_i)` is found:
+`svd` (the original, cells in index order), or, with the cells swept colour by colour, `colored-svd`, `rotor` (the
+geometric-algebra rotor estimator of "Robust Quaternion Estimation with Geometric Algebra", `src/procrustes.rs`),
+`foam`, and `rotor-simd` / `foam-simd`, which fit four cells of the same colour at once in SIMD lanes. All of them
+give the same shapes to about 1e-15.
 
 `--data` is the folder with the models (default `../src`). With `--high`/`--low` the full-resolution and control
 meshes are given explicitly, and each `--handle` is a sphere (centre and radius) in the normalised frame, where every
@@ -50,6 +58,9 @@ Paper data and figures:
 ```sh
 cargo run --release --bin experiments [all|convergence|feedback|iterative|bias|energy|comparison|timing]
 cargo run --release --bin render [all|teaser|pipeline|bar|arcs|cactus|colorbar|twist270]
+cargo run --release --bin experiments procrustes   # SR-ARAP local step: SVD vs rotor vs FOAM, scalar and SIMD
+cargo run --release --bin render srarap            # SR-ARAP poses with the rotor estimator (srarap_*.png)
+cargo run --release --example srarap_newton_steps  # Newton steps and fit times on the SR-ARAP cell problems
 ```
 
 `experiments` writes CSV files to `fast-linealized-rotation/data/`, and `render` writes images to

@@ -8,4 +8,9 @@ default-run = "arap"
 faer = "0.24"
 nalgebra = "0.35.0"
 png = "0.17"
+wide = "1.7"
 three-d = { version = "0.19", features = ["egui-gui"] }
+
+[profile.release]
+# One codegen unit: the SIMD Procrustes fits are sensitive to inlining across units (36 vs 25 ns per cell).
+codegen-units = 1

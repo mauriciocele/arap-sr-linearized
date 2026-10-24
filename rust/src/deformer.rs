@@ -20,6 +20,7 @@ use faer::sparse::{SparseColMat, Triplet};
 use nalgebra::{Matrix3, Matrix4, Quaternion, Rotation3, UnitQuaternion, Vector4};
 
 use crate::handle::Handle;
+use crate::procrustes;
 use crate::iterative::{Preconditioner, SymmetricMatrix, pcg};
 use crate::laplacian::{Laplacian, PoissonSolver, Weights};
 use crate::mesh::{Mesh, Vec3};
@@ -73,6 +74,23 @@ pub enum LocalStep {
     SrArap { sweeps: usize },
 }
 
+/// How the SR-ARAP baseline fits each cell's rotation, the orthogonal Procrustes problem `max tr(R^T M_i)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    /// SVD of `M_i`, cells in index order (the original baseline).
+    Svd,
+    /// SVD of `M_i`, cells in colour order (see [`SrArapSolver::colored`]).
+    ColoredSvd,
+    /// The geometric-algebra rotor method ([`crate::procrustes::rotor`]), one cell at a time, colour order.
+    Rotor,
+    /// FOAM ([`crate::procrustes::foam`]), one cell at a time, colour order.
+    Foam,
+    /// The rotor method on four cells of the same colour at once, in SIMD lanes.
+    RotorSimd,
+    /// FOAM on four cells of the same colour at once, in SIMD lanes.
+    FoamSimd,
+}
+
 /// Bending weight of the SR-ARAP baseline. Its bending term `||R_i - R_j||_F^2` is about `2 theta^2` for two
 /// rotations `theta` apart, while the quaternion term `||q_i - q_j||^2` is about `theta^2 / 4`; dividing the
 /// paper's `alpha` by 8 gives both methods the same stiffness for small rotation differences.
@@ -96,6 +114,11 @@ pub struct Deformer {
     /// None in control-only mode, where the control mesh is also the output mesh.
     high_solver: Option<PoissonSolver>,
     pub local_step: LocalStep,
+    /// Per-cell rotation fit of the SR-ARAP local step.
+    pub fit: Fit,
+    /// Cells grouped by colour: no two cells of a colour are neighbours, so the Gauss-Seidel updates of a colour
+    /// are independent of each other and can be done in any order, or four at a time. Computed on first use.
+    colors: Option<Vec<Vec<usize>>>,
     /// Feedback weight `e`. With `e > 0` the rotation system's smallest eigenvalue is at least `e`.
     pub feedback: f64,
     /// The rotation system keeps its sparsity pattern until the constraints change.
@@ -118,6 +141,21 @@ pub struct Deformer {
     high_rotations: Vec<Quat>,
     high_differentials: Vec<Vec3>,
     started: bool,
+}
+
+impl Fit {
+    /// Parses the names used on the command line: svd, colored-svd, rotor, rotor-simd, foam, foam-simd.
+    pub fn parse(name: &str) -> Option<Fit> {
+        Some(match name {
+            "svd" => Fit::Svd,
+            "colored-svd" => Fit::ColoredSvd,
+            "rotor" => Fit::Rotor,
+            "rotor-simd" => Fit::RotorSimd,
+            "foam" => Fit::Foam,
+            "foam-simd" => Fit::FoamSimd,
+            _ => return None,
+        })
+    }
 }
 
 impl Deformer {
@@ -156,6 +194,8 @@ impl Deformer {
             low_solver,
             high_solver,
             local_step: LocalStep::Pcg,
+            fit: Fit::Svd,
+            colors: None,
             feedback: FEEDBACK,
             rotation_symbolic: None,
             rotation_llt_symbolic: None,
@@ -198,6 +238,8 @@ impl Deformer {
             low_solver,
             high_solver: None,
             local_step: LocalStep::Pcg,
+            fit: Fit::Svd,
+            colors: None,
             feedback: FEEDBACK,
             rotation_symbolic: None,
             rotation_llt_symbolic: None,
@@ -270,7 +312,12 @@ impl Deformer {
             self.started = true;
         }
         for _ in 0..ITERATIONS_PER_FRAME {
-            self.solve_low_rotations();
+            // The SR-ARAP baseline runs with its own local step; every other mode uses the closed form.
+            if matches!(self.local_step, LocalStep::SrArap { .. }) {
+                self.local();
+            } else {
+                self.solve_low_rotations();
+            }
             self.solve_low_positions();
         }
         self.update_high();
@@ -497,6 +544,9 @@ impl Deformer {
     }
 
     fn solve_low_rotations_sr_arap(&mut self, sweeps: usize) {
+        if self.fit != Fit::Svd {
+            return self.solve_low_rotations_sr_arap_colored(sweeps);
+        }
         let n = self.low.num_vertices();
         let alpha_area = SR_ARAP_ALPHA * self.mesh_area;
         let covariances = self.covariances();
@@ -514,11 +564,132 @@ impl Deformer {
                 rotations[i] = nearest_rotation(&m);
             }
         }
+        self.finish_sr_arap(&rotations);
+    }
+
+    fn finish_sr_arap(&mut self, rotations: &[Matrix3<f64>]) {
         self.low_rotations = rotations
             .iter()
             .map(|r| UnitQuaternion::from_rotation_matrix(&Rotation3::from_matrix_unchecked(*r)))
             .collect();
         self.low_differentials = rotated_differentials(&self.low, &self.low_laplacian, &self.low_rotations);
+    }
+
+    /// Greedy colouring of the control mesh: each cell takes the smallest colour not used by its neighbours.
+    fn colors(&mut self) -> &[Vec<usize>] {
+        if self.colors.is_none() {
+            let n = self.low.num_vertices();
+            let mut color = vec![usize::MAX; n];
+            let mut groups: Vec<Vec<usize>> = Vec::new();
+            for i in 0..n {
+                let used: Vec<usize> = self.low.neighbors[i].iter().map(|&j| color[j]).collect();
+                let c = (0..).find(|c| !used.contains(c)).unwrap();
+                color[i] = c;
+                if c == groups.len() {
+                    groups.push(Vec::new());
+                }
+                groups[c].push(i);
+            }
+            self.colors = Some(groups);
+        }
+        self.colors.as_deref().unwrap()
+    }
+
+    /// The SR-ARAP local step with the cells swept colour by colour, and the fit chosen by [`Deformer::fit`].
+    /// Within a colour the updates are independent, so every fit gives the same Gauss-Seidel iteration, up to
+    /// the accuracy of the fit itself.
+    fn solve_low_rotations_sr_arap_colored(&mut self, sweeps: usize) {
+        let colors = self.colors().to_vec();
+        let alpha_area = SR_ARAP_ALPHA * self.mesh_area;
+        let covariances = self.covariances();
+        let degree: Vec<f64> = self.low.neighbors.iter().map(|r| r.len() as f64).collect();
+        let bounds = self.sr_arap_bounds(alpha_area, &degree);
+        let mut rotations: Vec<Matrix3<f64>> =
+            self.low_rotations.iter().map(|q| *q.to_rotation_matrix().matrix()).collect();
+        let cell = |i: usize, rotations: &[Matrix3<f64>]| {
+            let mut m = covariances[i];
+            for &j in &self.low.neighbors[i] {
+                m += rotations[j] * (alpha_area * (1.0 / degree[i] + 1.0 / degree[j]));
+            }
+            m
+        };
+        for _ in 0..sweeps {
+            for group in &colors {
+                match self.fit {
+                    Fit::RotorSimd | Fit::FoamSimd => {
+                        let solve = if self.fit == Fit::RotorSimd { procrustes::rotor_matrix4 } else { procrustes::foam_matrix4 };
+                        for chunk in group.chunks(4) {
+                            // a short last chunk repeats its last cell in the unused lanes
+                            let cells = [0, 1, 2, 3].map(|l| chunk[l.min(chunk.len() - 1)]);
+                            let ms = cells.map(|i| cell(i, &rotations));
+                            let r = solve([&ms[0], &ms[1], &ms[2], &ms[3]], cells.map(|i| bounds[i]));
+                            for (l, &i) in chunk.iter().enumerate() {
+                                rotations[i] = r[l];
+                            }
+                        }
+                    }
+                    fit => {
+                        for &i in group {
+                            let m = cell(i, &rotations);
+                            rotations[i] = match fit {
+                                Fit::Rotor => procrustes::rotor_matrix(&m, bounds[i]),
+                                Fit::Foam => procrustes::foam_matrix(&m, bounds[i]),
+                                _ => nearest_rotation(&m),
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        self.finish_sr_arap(&rotations);
+    }
+
+    /// An upper bound of the nuclear norm of each cell's matrix `M_i`, the start of Newton's method:
+    /// `sum |c| (|p|^2 + |q|^2) / 2` for the edges, and `3 a` for each neighbour rotation of weight `a`.
+    fn sr_arap_bounds(&self, alpha_area: f64, degree: &[f64]) -> Vec<f64> {
+        (0..self.low.num_vertices())
+            .map(|i| {
+                let mut h = 0.0;
+                for (&j, &c) in self.low.neighbors[i].iter().zip(&self.low_laplacian.weights[i]) {
+                    let q = self.low.positions[j] - self.low.positions[i];
+                    let p = self.low_positions[j] - self.low_positions[i];
+                    h += 0.5 * c.abs() * (p.norm_squared() + q.norm_squared());
+                    h += 3.0 * alpha_area * (1.0 / degree[i] + 1.0 / degree[j]);
+                }
+                h
+            })
+            .collect()
+    }
+
+    /// The SR-ARAP cell problems `M_i` at the current state, with the bounds of their largest eigenvalues: the
+    /// per-cell Procrustes problems alone, to time the fits without the Gauss-Seidel bookkeeping.
+    pub fn sr_arap_cell_problems(&self) -> (Vec<Matrix3<f64>>, Vec<f64>) {
+        let alpha_area = SR_ARAP_ALPHA * self.mesh_area;
+        let degree: Vec<f64> = self.low.neighbors.iter().map(|r| r.len() as f64).collect();
+        let covariances = self.covariances();
+        let rotations: Vec<Matrix3<f64>> =
+            self.low_rotations.iter().map(|q| *q.to_rotation_matrix().matrix()).collect();
+        let ms = (0..self.low.num_vertices())
+            .map(|i| {
+                let mut m = covariances[i];
+                for &j in &self.low.neighbors[i] {
+                    m += rotations[j] * (alpha_area * (1.0 / degree[i] + 1.0 / degree[j]));
+                }
+                m
+            })
+            .collect();
+        (ms, self.sr_arap_bounds(alpha_area, &degree))
+    }
+
+    /// Replaces the control-mesh rotations, e.g. to run several local steps from the same state.
+    pub fn set_low_rotations(&mut self, rotations: &[Quat]) {
+        self.low_rotations = rotations.to_vec();
+        self.low_differentials = rotated_differentials(&self.low, &self.low_laplacian, &self.low_rotations);
+    }
+
+    /// The number of colours of the SR-ARAP colour order.
+    pub fn color_count(&mut self) -> usize {
+        self.colors().len()
     }
 
     /// Shape quality of the deformed control mesh, independent of how its rotations were found: each cell's best
@@ -795,7 +966,7 @@ fn constrain(low: &Mesh, laplacian: &Laplacian, handles: &mut [Handle]) -> (Vec<
 }
 
 /// The rotation maximising `tr(R^T m)` (orthogonal Procrustes), by SVD.
-fn nearest_rotation(m: &Matrix3<f64>) -> Matrix3<f64> {
+pub fn nearest_rotation(m: &Matrix3<f64>) -> Matrix3<f64> {
     let svd = m.svd(true, true);
     let (u, v_t) = (svd.u.expect("U"), svd.v_t.expect("V^T"));
     let mut d = Matrix3::identity();

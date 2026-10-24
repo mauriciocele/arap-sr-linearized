@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 
 use std::time::Instant;
 
-use arap::deformer::{Deformer, LocalStep};
+use arap::deformer::{Deformer, Fit, LocalStep, nearest_rotation};
+use arap::procrustes;
+use nalgebra::Matrix3;
 use arap::handle::Handle;
 use arap::mesh::{Mesh, Vec3};
 use arap::scenes::{arc, armadillo_handles, armadillo_pose, bend, load, models, raise_arms, tube_length, tube_scene};
@@ -396,6 +398,161 @@ fn timing() {
     write("timing.csv", &csv);
 }
 
+/// The SR-ARAP baseline with its per-cell SVD replaced by the rotor method of "Robust Quaternion Estimation with
+/// Geometric Algebra" and by FOAM, one cell at a time and four cells at a time in SIMD lanes. The cells are swept
+/// colour by colour, so the Gauss-Seidel iteration is the same for every fit. Measures the local step (3 sweeps)
+/// from the same mid-solve state, the largest rotation difference against the SVD after one local step, and the
+/// largest vertex distance against the SVD after 50 full iterations.
+fn procrustes() {
+    let fits = [
+        ("svd", Fit::ColoredSvd),
+        ("rotor", Fit::Rotor),
+        ("foam", Fit::Foam),
+        ("rotor_simd", Fit::RotorSimd),
+        ("foam_simd", Fit::FoamSimd),
+    ];
+    let sweeps = 3;
+    let mut csv = String::from("scene,cells,colors,fit,local_ms,ns_per_cell_update,solve_ns_per_cell,max_angle_rad,max_distance\n");
+    for scene in ["armadillo_control", "cactus", "tube", "armadillo_full"] {
+        let make = || -> Deformer {
+            let mut d = match scene {
+                "armadillo_control" => {
+                    let mut d = Deformer::new(load("armadillo.obj"), load("armadillo1.obj"), armadillo_handles());
+                    armadillo_pose(&mut d, 2);
+                    d
+                }
+                "armadillo_full" => {
+                    let mut d = Deformer::control_only(load("armadillo.obj"), armadillo_handles());
+                    armadillo_pose(&mut d, 2);
+                    d
+                }
+                "cactus" => {
+                    let mut d = Deformer::control_only(load("cactus2.obj"), vec![
+                        Handle::new(Vec3::new(0.0, 0.04, 0.7), 0.15),
+                        Handle::new(Vec3::new(0.0, 0.04, -0.8), 0.15),
+                    ]);
+                    d.handles[0].translation += Vec3::new(-0.1, 0.15, 0.0);
+                    d
+                }
+                _ => {
+                    let (mesh, handles) = tube_scene(161, 192);
+                    let length = tube_length(&mesh);
+                    let mut d = Deformer::control_only(mesh, handles);
+                    arc(&mut d.handles[1], length, 90.0);
+                    d
+                }
+            };
+            d.local_step = LocalStep::SrArap { sweeps };
+            d
+        };
+        let mut d = make();
+        d.fit = Fit::ColoredSvd;
+        for _ in 0..5 {
+            d.iterate();
+        }
+        let start_rotations = d.low_rotations().to_vec();
+        let cells = d.low.num_vertices();
+        let colors = d.color_count();
+        // reference: one local step with the SVD, and 50 iterations with the SVD
+        d.set_low_rotations(&start_rotations);
+        d.local();
+        let reference_rotations = d.low_rotations().to_vec();
+        let mut reference = make();
+        reference.fit = Fit::ColoredSvd;
+        for _ in 0..50 {
+            reference.iterate();
+        }
+        // the fits alone, on the cell problems of the mid-solve state, stored as in the local step (one 3x3 matrix
+        // per cell); the SIMD fits gather four of them into lanes and scatter the results back
+        d.set_low_rotations(&start_rotations);
+        let (ms, bounds) = d.sr_arap_cell_problems();
+        let mut out = vec![Matrix3::zeros(); cells];
+        let solve_ns = |fit: Fit, out: &mut Vec<Matrix3<f64>>| {
+            let reps = (4_000_000 / cells).clamp(3, 2000);
+            let mut best = f64::MAX;
+            for _ in 0..5 {
+                let t = Instant::now();
+                for _ in 0..reps {
+                    match fit {
+                        Fit::RotorSimd | Fit::FoamSimd => {
+                            let solve =
+                                if fit == Fit::RotorSimd { procrustes::rotor_matrix4 } else { procrustes::foam_matrix4 };
+                            for c in (0..cells).step_by(4) {
+                                let idx = [0, 1, 2, 3].map(|l| (c + l).min(cells - 1));
+                                let r = solve(idx.map(|i| &ms[i]), idx.map(|i| bounds[i]));
+                                for (l, &i) in idx.iter().enumerate() {
+                                    out[i] = r[l];
+                                }
+                            }
+                        }
+                        Fit::Rotor => {
+                            for i in 0..cells {
+                                out[i] = procrustes::rotor_matrix(&ms[i], bounds[i]);
+                            }
+                        }
+                        Fit::Foam => {
+                            for i in 0..cells {
+                                out[i] = procrustes::foam_matrix(&ms[i], bounds[i]);
+                            }
+                        }
+                        _ => {
+                            for i in 0..cells {
+                                out[i] = nearest_rotation(&ms[i]);
+                            }
+                        }
+                    }
+                    std::hint::black_box(&mut *out);
+                }
+                best = best.min(t.elapsed().as_secs_f64() * 1e9 / (reps * cells) as f64);
+            }
+            best
+        };
+        for (label, fit) in fits {
+            let solve = solve_ns(fit, &mut out);
+            d.fit = fit;
+            let reps = (2_000_000 / cells).clamp(3, 200);
+            let mut best = f64::MAX;
+            for _ in 0..5 {
+                let mut total = 0.0;
+                for _ in 0..reps {
+                    d.set_low_rotations(&start_rotations);
+                    let t = Instant::now();
+                    d.local();
+                    total += t.elapsed().as_secs_f64();
+                }
+                best = best.min(total * 1e3 / reps as f64);
+            }
+            d.set_low_rotations(&start_rotations);
+            d.local();
+            let max_angle = d
+                .low_rotations()
+                .iter()
+                .zip(&reference_rotations)
+                .map(|(a, b)| a.angle_to(b))
+                .fold(0.0, f64::max);
+            let mut full = make();
+            full.fit = fit;
+            for _ in 0..50 {
+                full.iterate();
+            }
+            let max_distance = full
+                .low_positions()
+                .iter()
+                .zip(reference.low_positions())
+                .map(|(a, b)| (a - b).norm())
+                .fold(0.0, f64::max);
+            let per_update = best * 1e6 / (cells * sweeps) as f64;
+            writeln!(csv, "{scene},{cells},{colors},{label},{best:.4},{per_update:.1},{solve:.1},{max_angle:.2e},{max_distance:.2e}")
+                .unwrap();
+            println!(
+                "{scene} ({cells} cells, {colors} colours) {label}: local {best:.3} ms ({per_update:.1} ns per cell \
+                 update, fit alone {solve:.1} ns), max angle {max_angle:.2e} rad, max distance after 50 iterations {max_distance:.2e}"
+            );
+        }
+    }
+    write("procrustes.csv", &csv);
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "all".to_string());
     if which == "all" || which == "convergence" {
@@ -418,5 +575,8 @@ fn main() {
     }
     if which == "all" || which == "timing" {
         timing();
+    }
+    if which == "procrustes" {
+        procrustes();
     }
 }
